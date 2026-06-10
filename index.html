@@ -2758,6 +2758,70 @@
               </div>
             </div>
             <div class="detail-modal-body">
+              <div
+                style="
+                  display: flex;
+                  gap: 8px;
+                  align-items: center;
+                  flex-wrap: wrap;
+                  margin-bottom: 10px;
+                "
+              >
+                <input
+                  id="pp-so-search"
+                  class="inp"
+                  style="max-width: 260px"
+                  placeholder="Cari SO / destination / zone..."
+                  oninput="renderPickerProgressModalRows()"
+                />
+
+                <select
+                  id="pp-status-filter"
+                  class="inp"
+                  style="max-width: 170px"
+                  onchange="renderPickerProgressModalRows()"
+                >
+                  <option value="">Status semua</option>
+                  <option value="NEW">NEW</option>
+                  <option value="PICKING">PICKING</option>
+                  <option value="COMPLETED">COMPLETED</option>
+                  <option value="PACKING">PACKING</option>
+                  <option value="STAGING">STAGING</option>
+                  <option value="LOADING">LOADING</option>
+                  <option value="READY TO SHIP">READY TO SHIP</option>
+                </select>
+
+                <select
+                  id="pp-wave-filter"
+                  class="inp"
+                  style="max-width: 150px"
+                  onchange="renderPickerProgressModalRows()"
+                >
+                  <option value="">Wave semua</option>
+                </select>
+
+                <select
+                  id="pp-zone-filter"
+                  class="inp"
+                  style="max-width: 180px"
+                  onchange="renderPickerProgressModalRows()"
+                >
+                  <option value="">Zone semua</option>
+                </select>
+
+                <button class="btn-cancel" onclick="resetPickerProgressModalFilter()">
+                  Reset
+                </button>
+
+                <div
+                  id="pp-modal-count"
+                  class="mono"
+                  style="margin-left: auto; color: var(--text3)"
+                >
+                  0 SO
+                </div>
+              </div>
+
               <div class="pp-detail-list">
                 <table class="pp-detail-table">
                   <thead>
@@ -5052,69 +5116,206 @@
               .join("");
           }
 
+          function filterPickerSummary() {
+            const q = String(
+              document.getElementById("picker-summary-search")?.value || "",
+            )
+              .toLowerCase()
+              .trim();
+
+            document.querySelectorAll("#picker-tbody tr").forEach((tr) => {
+              tr.style.display =
+                !q || tr.textContent.toLowerCase().includes(q) ? "" : "none";
+            });
+          }
+
+          let activePickerProgressDetail = null;
+
           function showPickerProgressDetail(key) {
+            key = decodeURIComponent(String(key || ""));
+            const d = (pickerProgressRows || []).find((x) => x.key === key);
+            if (!d) return;
+
+            activePickerProgressDetail = d;
+
+            const bg = document.getElementById("picker-progress-modal");
+            const title = document.getElementById("pp-modal-title");
+            const sub = document.getElementById("pp-modal-sub");
+
+            if (!bg) return;
+
+            title.innerText = "Daftar SO · " + d.picker;
+            sub.innerText = `${d.assigned_so} SO assigned · ${Number(
+              d.assigned_qty || 0,
+            ).toLocaleString("id-ID")} qty · ${d.staff_id || "-"}`;
+
+            const search = document.getElementById("pp-so-search");
+            const status = document.getElementById("pp-status-filter");
+            if (search) search.value = "";
+            if (status) status.value = "";
+
+            populatePickerProgressModalFilters(d.so_list || []);
+            renderPickerProgressModalRows();
+
+            bg.classList.add("open");
+          }
+
+          function populatePickerProgressModalFilters(list) {
+            const waveSel = document.getElementById("pp-wave-filter");
+            const zoneSel = document.getElementById("pp-zone-filter");
+
+            if (waveSel) {
+              const waves = [
+                ...new Set(
+                  (list || [])
+                    .map((s) => s.WAVE || getWave(s.destination_name))
+                    .filter(Boolean),
+                ),
+              ].sort((a, b) => (waveRank(a) || 999) - (waveRank(b) || 999));
+
+              waveSel.innerHTML =
+                '<option value="">Wave semua</option>' +
+                waves
+                  .map((w) => `<option value="${escAttr(w)}">${esc(w)}</option>`)
+                  .join("");
+            }
+
+            if (zoneSel) {
+              const zones = [
+                ...new Set(
+                  (list || [])
+                    .map((s) => s.picking_zone || s["Picking Zone"] || "")
+                    .filter(Boolean),
+                ),
+              ].sort();
+
+              zoneSel.innerHTML =
+                '<option value="">Zone semua</option>' +
+                zones
+                  .map((z) => `<option value="${escAttr(z)}">${esc(z)}</option>`)
+                  .join("");
+            }
+          }
+
+          function resetPickerProgressModalFilter() {
+            [
+              "pp-so-search",
+              "pp-status-filter",
+              "pp-wave-filter",
+              "pp-zone-filter",
+            ].forEach((id) => {
+              const el = document.getElementById(id);
+              if (el) el.value = "";
+            });
+
+            renderPickerProgressModalRows();
+          }
+
+          function renderPickerProgressModalRows() {
             function statusClass(status) {
               const s = String(status || "")
                 .toUpperCase()
                 .trim();
               if (s === "NEW") return "s-new";
               if (s === "PICKING") return "s-prog";
-              if (["PACKING", "STAGING", "LOADING"].includes(s)) return "s-done";
+              if (["COMPLETED", "PACKING", "STAGING", "LOADING"].includes(s)) {
+                return "s-done";
+              }
               if (s === "READY TO SHIP") return "s-del";
               return "s-oth";
             }
 
-            function filterPickerSummary() {
-              const q = String(
-                document.getElementById("picker-summary-search")?.value || "",
-              )
-                .toLowerCase()
-                .trim();
-              document.querySelectorAll("#picker-tbody tr").forEach((tr) => {
-                tr.style.display =
-                  !q || tr.textContent.toLowerCase().includes(q) ? "" : "none";
-              });
-            }
-            key = decodeURIComponent(String(key || ""));
-            const d = (pickerProgressRows || []).find((x) => x.key === key);
-            if (!d) return;
-            const bg = document.getElementById("picker-progress-modal");
-            const title = document.getElementById("pp-modal-title");
-            const sub = document.getElementById("pp-modal-sub");
+            const d = activePickerProgressDetail;
             const tbody = document.getElementById("pp-modal-tbody");
-            if (!bg || !tbody) return;
-            title.innerText = "Daftar SO · " + d.picker;
-            sub.innerText = `${d.assigned_so} SO assigned · ${Number(d.assigned_qty || 0).toLocaleString("id-ID")} qty · ${d.staff_id || "-"}`;
-            const list = [...(d.so_list || [])].sort((a, b) => {
-              const wa = WAVE_ORDER_PGS[a.WAVE] || waveRank(a.WAVE),
-                wb = WAVE_ORDER_PGS[b.WAVE] || waveRank(b.WAVE);
-              return (
-                wa - wb ||
-                String(a.destination_name || "").localeCompare(
-                  String(b.destination_name || ""),
-                )
+            const countEl = document.getElementById("pp-modal-count");
+            if (!d || !tbody) return;
+
+            const q = String(document.getElementById("pp-so-search")?.value || "")
+              .toLowerCase()
+              .trim();
+            const st = String(
+              document.getElementById("pp-status-filter")?.value || "",
+            )
+              .toUpperCase()
+              .trim();
+            const wv = String(
+              document.getElementById("pp-wave-filter")?.value || "",
+            ).trim();
+            const zn = String(
+              document.getElementById("pp-zone-filter")?.value || "",
+            ).trim();
+
+            const list = [...(d.so_list || [])]
+              .filter((s) => {
+                const so = String(s.so_number || "").toLowerCase();
+                const dest = String(s.destination_name || "").toLowerCase();
+                const zoneRaw = String(s.picking_zone || s["Picking Zone"] || "");
+                const zone = zoneRaw.toLowerCase();
+                const status = String(s.status || "")
+                  .toUpperCase()
+                  .trim();
+                const wave = String(
+                  s.WAVE || getWave(s.destination_name) || "",
+                ).trim();
+
+                const matchSearch =
+                  !q || so.includes(q) || dest.includes(q) || zone.includes(q);
+
+                return (
+                  matchSearch &&
+                  (!st || status === st) &&
+                  (!wv || wave === wv) &&
+                  (!zn || zoneRaw === zn)
+                );
+              })
+              .sort((a, b) => {
+                const wa = WAVE_ORDER_PGS[a.WAVE] || waveRank(a.WAVE);
+                const wb = WAVE_ORDER_PGS[b.WAVE] || waveRank(b.WAVE);
+                return (
+                  wa - wb ||
+                  String(a.destination_name || "").localeCompare(
+                    String(b.destination_name || ""),
+                  )
+                );
+              });
+
+            if (countEl) {
+              const qty = list.reduce(
+                (a, s) => a + (Number(s.request_quantity || 0) || 0),
+                0,
               );
-            });
+              countEl.innerText =
+                `${list.length.toLocaleString("id-ID")} SO · ` +
+                `${qty.toLocaleString("id-ID")} qty`;
+            }
+
             if (!list.length) {
               tbody.innerHTML =
-                '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:18px">Picker ini belum punya daftar SO.</td></tr>';
-            } else {
-              tbody.innerHTML = list
-                .map((s) => {
-                  const w = s.WAVE || getWave(s.destination_name);
-                  return `<tr>
+                '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:18px">Tidak ada SO sesuai filter.</td></tr>';
+              return;
+            }
+
+            tbody.innerHTML = list
+              .map((s) => {
+                const w = s.WAVE || getWave(s.destination_name);
+                const zone = s.picking_zone || s["Picking Zone"] || "-";
+                return `<tr>
                     <td class="mono">${esc(s.so_number || "-")}</td>
                     <td style="font-weight:600">${esc(s.destination_name || "-")}</td>
                     <td>${waveBadge(w)}</td>
-                    <td><span class="zone-badge">${esc(s.picking_zone || "-")}</span></td>
+                    <td><span class="zone-badge">${esc(zone)}</span></td>
                     <td><span class="badge ${statusClass(s.status)}">${esc(s.status || "NEW")}</span></td>
-                    <td class="mono" style="text-align:right;font-weight:800">${Number(s.request_quantity || 0).toLocaleString("id-ID")}</td>
+                    <td class="mono" style="text-align:right;font-weight:800">${Number(
+                      s.request_quantity || 0,
+                    ).toLocaleString("id-ID")}</td>
                   </tr>`;
-                })
-                .join("");
-            }
-            bg.classList.add("open");
+              })
+              .join("");
           }
+
+          window.filterPickerSummary = filterPickerSummary;
+          window.renderPickerProgressModalRows = renderPickerProgressModalRows;
+          window.resetPickerProgressModalFilter = resetPickerProgressModalFilter;
 
           function closePickerProgressModal() {
             const bg = document.getElementById("picker-progress-modal");

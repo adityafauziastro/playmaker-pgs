@@ -5724,10 +5724,9 @@
 
           rows.forEach((r) => {
             const wave = getCsvWaveKey(r);
-            const type = getCsvTypeKey(r);
-            const key = `${wave}|||${type}`;
+            const key = wave;
 
-            if (!grouped[key]) grouped[key] = { wave, type, rows: [] };
+            if (!grouped[key]) grouped[key] = { wave, rows: [] };
             grouped[key].rows.push(r);
           });
 
@@ -5737,25 +5736,22 @@
           };
 
           const groups = Object.values(grouped).sort((a, b) => {
-            const wd = waveOrderNum(a.wave) - waveOrderNum(b.wave);
-            if (wd !== 0) return wd;
-            return typeOrderNum(a.type) - typeOrderNum(b.type);
+            return waveOrderNum(a.wave) - waveOrderNum(b.wave);
           });
 
           groups.forEach((g) => {
             const csvText = buildWmsCsvText(g.rows);
             const safeWave = safeFilePart(g.wave);
-            const safeType = safeFilePart(g.type);
             const safeMode = isCurrentAssignModeReceh() ? "receh" : "regular";
 
             downloadBlobFile(
               csvText,
-              `wms_pgs_${safeMode}_${safeWave}_${safeType}_${new Date().toISOString().slice(0, 10)}.csv`,
+              `wms_pgs_${safeMode}_${safeWave}_${new Date().toISOString().slice(0, 10)}.csv`,
             );
           });
 
           addLog(
-            `CSV backend assigned downloaded: ${groups.length} file · ${rows.length} unique SO · split by wave & type`,
+            `CSV backend assigned downloaded: ${groups.length} file · ${rows.length} unique SO · split by wave only`,
             "ok",
           );
         }

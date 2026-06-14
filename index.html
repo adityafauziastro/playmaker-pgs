@@ -3830,129 +3830,130 @@
         function allocateZoneAware(pool, pList, options = {}) {
           const iw = getInitialWorkload(pList);
           initAssignResult(pList, iw);
-          const zones = buildZoneWorkload(pool);
+          const target =
+            Number(document.getElementById("target")?.value) || 2400;
+          const softTarget = Math.round(target * 1.1);
           const singleZone = options.singleZone || "";
-          const zoneQueue = singleZone
-            ? zones.filter((z) => z.zone === singleZone)
-            : zones;
-          if (!zoneQueue.length)
-            return {
-              targetLabel:
-                Number(document.getElementById("target").value) || 2400,
-              zones: [],
-            };
+          const sourcePool = singleZone
+            ? (pool || []).filter(
+                (s) =>
+                  String(s.picking_zone || "") === String(singleZone || ""),
+              )
+            : (pool || []).slice();
 
-          const zoneAlloc = {};
-          zoneQueue.forEach((z) => (zoneAlloc[z.zone] = []));
-          let remainingPickers = pList.slice();
-
-          while (
-            remainingPickers.length &&
-            zoneQueue.some((z) => zoneAlloc[z.zone].length < z.need)
-          ) {
-            const bestZone = zoneQueue
-              .filter((z) => zoneAlloc[z.zone].length < z.need)
-              .sort((a, b) => {
-                const ar =
-                  Number(a.qty || 0) /
-                  Math.max(
-                    1,
-                    Number(a.target || 2400) * (zoneAlloc[a.zone].length + 1),
-                  );
-                const br =
-                  Number(b.qty || 0) /
-                  Math.max(
-                    1,
-                    Number(b.target || 2400) * (zoneAlloc[b.zone].length + 1),
-                  );
-                const ap = Number(a.priority || 9),
-                  bp = Number(b.priority || 9);
-                if (ap !== bp) return ap - bp;
-                return br - ar || Number(b.qty || 0) - Number(a.qty || 0);
-              })[0];
-            zoneAlloc[bestZone.zone].push(remainingPickers.shift());
+          if (!sourcePool.length) {
+            return { targetLabel: target, zones: [], zoneAlloc: {} };
           }
 
-          // Kalau cuma satu zone, semua picker dipakai untuk zone itu.
-          if (singleZone && remainingPickers.length) {
-            zoneAlloc[singleZone].push(...remainingPickers.splice(0));
+          function shuffleRows(arr) {
+            const out = arr.slice();
+            for (let i = out.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [out[i], out[j]] = [out[j], out[i]];
+            }
+            return out;
           }
 
-          zoneQueue.forEach((z) => {
-            const pickers = zoneAlloc[z.zone] || [];
-            pickers.forEach((p) => {
-              assignResult[p].zone = z.zone;
-              assignResult[p].zoneGroup = z.group;
-              assignResult[p].zoneTarget = z.target;
-              assignResult[p].totalQty = Number(
-                assignResult[p].initialQty || 0,
-              );
+          // Operational rule PGS:
+          // - Qty tetap diratakan antar picker.
+          // - Zone jangan dikunci 1 picker = 1 zone.
+          // - SO dibuat round-robin antar zone supaya tiap picker dapat mix zone yang random/bervariasi.
+          const zoneBuckets = {};
+          sourcePool.forEach((s) => {
+            const z = String(s.picking_zone || "UNKNOWN").trim() || "UNKNOWN";
+            if (!zoneBuckets[z]) zoneBuckets[z] = [];
+            zoneBuckets[z].push(s);
+          });
+
+          Object.keys(zoneBuckets).forEach((z) => {
+            zoneBuckets[z] = shuffleRows(zoneBuckets[z]).sort(
+              (a, b) =>
+                Number(b.request_quantity || 0) -
+                  Number(a.request_quantity || 0) ||
+                Number(b.sku_count || 0) - Number(a.sku_count || 0),
+            );
+          });
+
+          let zoneOrder = shuffleRows(Object.keys(zoneBuckets));
+          const mixedQueue = [];
+          while (zoneOrder.some((z) => zoneBuckets[z]?.length)) {
+            zoneOrder.forEach((z) => {
+              if (zoneBuckets[z]?.length)
+                mixedQueue.push(zoneBuckets[z].shift());
             });
-            if (!pickers.length) {
-              z.rows.forEach((s) =>
-                assignSkippedRows.push({
-                  ...s,
-                  skip_reason: "NO_PICKER_FOR_ZONE",
-                }),
+            zoneOrder = shuffleRows(
+              zoneOrder.filter((z) => zoneBuckets[z]?.length),
+            );
+          }
+
+          const pickerZoneCounts = {};
+          pList.forEach((p) => {
+            pickerZoneCounts[p] = {};
+            assignResult[p].zone = "MIXED";
+            assignResult[p].zoneGroup = "Random Zone";
+            assignResult[p].zoneTarget = target;
+          });
+
+          mixedQueue.forEach((s) => {
+            const sq = Number(s.request_quantity || 0);
+            const z = String(s.picking_zone || "UNKNOWN").trim() || "UNKNOWN";
+            let candidates = pList.filter(
+              (p) => Number(assignResult[p].totalQty || 0) + sq <= target,
+            );
+            let forced = false;
+            if (!candidates.length) {
+              candidates = pList.filter(
+                (p) => Number(assignResult[p].totalQty || 0) + sq <= softTarget,
               );
+              forced = candidates.length > 0;
+            }
+            if (!candidates.length) {
+              assignSkippedRows.push({ ...s, skip_reason: "TARGET_FULL" });
               return;
             }
-            z.rows
-              .slice()
-              .sort(
-                (a, b) =>
-                  Number(b.request_quantity || 0) -
-                    Number(a.request_quantity || 0) ||
-                  Number(b.sku_count || 0) - Number(a.sku_count || 0),
-              )
-              .forEach((s) => {
-                const sq = Number(s.request_quantity || 0);
-                const hard = Number(z.target || 2400);
-                const soft = Math.round(hard * 1.1);
-                let candidates = pickers.filter(
-                  (p) => Number(assignResult[p].newQty || 0) + sq <= hard,
-                );
-                let forced = false;
-                if (!candidates.length) {
-                  candidates = pickers.filter(
-                    (p) => Number(assignResult[p].newQty || 0) + sq <= soft,
-                  );
-                  forced = candidates.length > 0;
-                }
-                if (!candidates.length) {
-                  assignSkippedRows.push({
-                    ...s,
-                    skip_reason: "ZONE_TARGET_FULL",
-                  });
-                  return;
-                }
-                candidates.sort(
-                  (a, b) =>
-                    Number(assignResult[a].newQty || 0) -
-                      Number(assignResult[b].newQty || 0) ||
-                    Number(assignResult[a].soList.length || 0) -
-                      Number(assignResult[b].soList.length || 0),
-                );
-                const best = candidates[0];
-                const row = forced ? { ...s, force_assigned: true } : s;
-                assignResult[best].soList.push(row);
-                assignResult[best].newQty += sq;
-                assignResult[best].totalQty += sq;
-                if (forced) assignForcedRows.push({ ...row, picker: best });
-              });
+
+            candidates.sort((a, b) => {
+              const aq = Number(assignResult[a].totalQty || 0);
+              const bq = Number(assignResult[b].totalQty || 0);
+              const az = Number(pickerZoneCounts[a][z] || 0);
+              const bz = Number(pickerZoneCounts[b][z] || 0);
+              const aso = Number(assignResult[a].soList.length || 0);
+              const bso = Number(assignResult[b].soList.length || 0);
+              return aq - bq || az - bz || aso - bso || Math.random() - 0.5;
+            });
+
+            const best = candidates[0];
+            const row = forced ? { ...s, force_assigned: true } : s;
+            assignResult[best].soList.push(row);
+            assignResult[best].newQty += sq;
+            assignResult[best].totalQty += sq;
+            pickerZoneCounts[best][z] =
+              Number(pickerZoneCounts[best][z] || 0) + 1;
+            if (forced) assignForcedRows.push({ ...row, picker: best });
           });
 
-          // Picker yang tidak kepakai tetap tampil kosong.
           pList.forEach((p) => {
-            if (!assignResult[p].zone) {
+            const zones = Object.keys(pickerZoneCounts[p] || {}).filter(
+              (z) => pickerZoneCounts[p][z] > 0,
+            );
+            if (!assignResult[p].soList.length) {
               assignResult[p].zone = "-";
               assignResult[p].zoneGroup = "Idle";
-              assignResult[p].zoneTarget =
-                Number(document.getElementById("target").value) || 2400;
+            } else if (zones.length === 1) {
+              assignResult[p].zone = zones[0];
+              assignResult[p].zoneGroup = "Single Zone";
+            } else {
+              assignResult[p].zone = `${zones.length} Zones`;
+              assignResult[p].zoneGroup = "Mixed Random";
             }
+            assignResult[p].zoneTarget = target;
           });
 
-          return { targetLabel: 0, zones: zoneQueue, zoneAlloc };
+          return {
+            targetLabel: target,
+            zones: buildZoneWorkload(sourcePool),
+            zoneAlloc: pickerZoneCounts,
+          };
         }
         function getPickerCardTarget(d, fallback) {
           return Number(
@@ -4210,7 +4211,7 @@
               assignSkippedRows.length +
                 " SO / " +
                 skippedQty.toLocaleString("id-ID") +
-                " qty di-skip (zone target full / picker kurang)",
+                " qty di-skip (target full / picker kurang)",
               "warn",
             );
           }
@@ -4263,7 +4264,7 @@
           );
           renderResultCards(2400);
           alert(
-            "🪄 Smart Suggestion selesai.\n\nRule:\n- Chamber target 1.500 / picker\n- Ambient & Glassdoor target 2.400 / picker\n- SO locked/status non-NEW tetap exclude\n\nZone: " +
+            "🪄 Smart Suggestion selesai.\n\nRule:\n- Qty tetap dibagi rata antar picker\n- Zone dibuat mixed/random, tidak dikunci 1 picker = 1 zone\n- SO locked/status non-NEW tetap exclude\n\nZone: " +
               zones.length +
               "\nIdeal picker: " +
               idealPickers +
@@ -4530,7 +4531,7 @@
             (a, s) => a + Number(s.request_quantity || 0),
             0,
           );
-          let html = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px;flex-wrap:wrap"><div><div style="font-weight:700;font-size:14px">Hasil Alokasi</div><div class="mono" style="font-size:10px;color:var(--text3);margin-top:2px">${totalSO.toLocaleString("id-ID")} SO assigned · ${totalQty.toLocaleString("id-ID")} qty · ${skipSO.toLocaleString("id-ID")} SO skipped · ${arr.length} picker</div></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-ghost" onclick="copyAssignedGlobal('so',this,event)">📋 Copy All SO</button><button class="btn-ghost" onclick="copyAssignedGlobal('upload',this,event)">📋 Copy WMS Format</button><button class="btn-ghost" onclick="submitToGoogle()" style="background:var(--green);color:#fff;border:none;font-weight:600;padding:6px 12px">💾 Simpan ke Google Sheets</button></div></div>${skipSO ? `<div style="margin-bottom:12px;background:var(--amber-dim);border:1px solid var(--amber-light);color:var(--amber);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:11px">⚠️ ${skipSO} SO / ${skipQty.toLocaleString("id-ID")} qty di-skip (target zone full / picker kurang)</div>` : ""}<div style="display:flex;flex-direction:column;gap:10px" id="picker-grid">`;
+          let html = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px;flex-wrap:wrap"><div><div style="font-weight:700;font-size:14px">Hasil Alokasi</div><div class="mono" style="font-size:10px;color:var(--text3);margin-top:2px">${totalSO.toLocaleString("id-ID")} SO assigned · ${totalQty.toLocaleString("id-ID")} qty · ${skipSO.toLocaleString("id-ID")} SO skipped · ${arr.length} picker</div></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-ghost" onclick="copyAssignedGlobal('so',this,event)">📋 Copy All SO</button><button class="btn-ghost" onclick="copyAssignedGlobal('upload',this,event)">📋 Copy WMS Format</button><button class="btn-ghost" onclick="submitToGoogle()" style="background:var(--green);color:#fff;border:none;font-weight:600;padding:6px 12px">💾 Simpan ke Google Sheets</button></div></div>${skipSO ? `<div style="margin-bottom:12px;background:var(--amber-dim);border:1px solid var(--amber-light);color:var(--amber);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:11px">⚠️ ${skipSO} SO / ${skipQty.toLocaleString("id-ID")} qty di-skip (target full / picker kurang)</div>` : ""}<div style="display:flex;flex-direction:column;gap:10px" id="picker-grid">`;
           arr.forEach((d, idx) => {
             const cardTarget = getPickerCardTarget(d, tgt);
             const pctRaw = Math.round(
@@ -4575,7 +4576,7 @@
                 return `<tr><td class="mono">${esc(s.so_number)}</td><td style="font-weight:500">${esc(s.destination_name || "-")}</td><td class="mono"><span class="zone-badge">${esc(s.picking_zone || "-")}</span></td><td>${waveBadge(w)}</td><td><span class="badge ${badgeClass(t)}">${esc(t)}</span></td><td class="mono" style="text-align:right;font-weight:700">${Number(s.request_quantity || 0).toLocaleString("id-ID")}${s.force_assigned ? ' <span class="badge s-prog">forced</span>' : ""}</td></tr>`;
               })
               .join("");
-            html += `<div class="pc" data-picker="${esc(d.picker)}" data-staff-id="${esc(sid)}"><div class="pc-head" onclick="this.parentElement.classList.toggle('open')"><div class="pc-av" style="background:${COLORS[idx % COLORS.length]}22;color:${COLORS[idx % COLORS.length]}">${esc(d.picker.slice(0, 2).toUpperCase())}</div><div class="pc-info"><div class="pc-name">${esc(sid ? sid + " | " : "")}${esc(d.picker)}</div><div class="pc-meta">${d.zone && d.zone !== "-" ? esc(d.zone) + " · " : ""}${d.zoneGroup ? esc(d.zoneGroup) + " · " : ""}${d.soList.length.toLocaleString("id-ID")} SO baru · ${d.newQty.toLocaleString("id-ID")} qty · target ${cardTarget.toLocaleString("id-ID")}</div></div><div class="pc-right"><div style="text-align:right"><div class="pc-qty">${d.totalQty.toLocaleString("id-ID")} Qty</div><div class="pc-pct" style="color:${barColor};font-weight:600">${pctRaw}% dari target zone</div></div><div class="chevron">▼</div></div></div><div class="pc-bar"><div class="bar-bg"><div class="bar-fg" style="width:${pct}%;background:${barColor}"></div></div><div class="bar-lbl">(Beban: ${d.initialQty.toLocaleString("id-ID")} | Baru: +${d.newQty.toLocaleString("id-ID")})</div></div><div class="pc-detail"><div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--bg3)"><div style="display:flex;gap:5px;flex-wrap:wrap">${zChips || '<span class="mono" style="color:var(--text3)">No zone</span>'}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="copy-btn" onclick="copyAssignedPicker('so',this,event)">📋 Copy SO</button><button class="copy-btn" onclick="copyAssignedPicker('upload',this,event)">📋 Copy WMS</button><button class="copy-btn" onclick="downloadAssignedPickerCSV(this,event)">📥 CSV</button></div></div><div style="overflow:auto;max-height:420px"><table><thead><tr><th>SO Number</th><th>Destination</th><th>Zone</th><th>Wave</th><th>Drop</th><th style="text-align:right">Qty</th></tr></thead><tbody>${trows}</tbody></table></div></div></div>`;
+            html += `<div class="pc" data-picker="${esc(d.picker)}" data-staff-id="${esc(sid)}"><div class="pc-head" onclick="this.parentElement.classList.toggle('open')"><div class="pc-av" style="background:${COLORS[idx % COLORS.length]}22;color:${COLORS[idx % COLORS.length]}">${esc(d.picker.slice(0, 2).toUpperCase())}</div><div class="pc-info"><div class="pc-name">${esc(sid ? sid + " | " : "")}${esc(d.picker)}</div><div class="pc-meta">${d.zone && d.zone !== "-" ? esc(d.zone) + " · " : ""}${d.zoneGroup ? esc(d.zoneGroup) + " · " : ""}${d.soList.length.toLocaleString("id-ID")} SO baru · ${d.newQty.toLocaleString("id-ID")} qty · target ${cardTarget.toLocaleString("id-ID")}</div></div><div class="pc-right"><div style="text-align:right"><div class="pc-qty">${d.totalQty.toLocaleString("id-ID")} Qty</div><div class="pc-pct" style="color:${barColor};font-weight:600">${pctRaw}% dari target</div></div><div class="chevron">▼</div></div></div><div class="pc-bar"><div class="bar-bg"><div class="bar-fg" style="width:${pct}%;background:${barColor}"></div></div><div class="bar-lbl">(Beban: ${d.initialQty.toLocaleString("id-ID")} | Baru: +${d.newQty.toLocaleString("id-ID")})</div></div><div class="pc-detail"><div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--bg3)"><div style="display:flex;gap:5px;flex-wrap:wrap">${zChips || '<span class="mono" style="color:var(--text3)">No zone</span>'}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="copy-btn" onclick="copyAssignedPicker('so',this,event)">📋 Copy SO</button><button class="copy-btn" onclick="copyAssignedPicker('upload',this,event)">📋 Copy WMS</button><button class="copy-btn" onclick="downloadAssignedPickerCSV(this,event)">📥 CSV</button></div></div><div style="overflow:auto;max-height:420px"><table><thead><tr><th>SO Number</th><th>Destination</th><th>Zone</th><th>Wave</th><th>Drop</th><th style="text-align:right">Qty</th></tr></thead><tbody>${trows}</tbody></table></div></div></div>`;
           });
           html += `</div>`;
           container.innerHTML = html;

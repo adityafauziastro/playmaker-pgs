@@ -1830,8 +1830,14 @@
           <button class="nav-btn" onclick="showPage('so', this)">
             Data SO
           </button>
-          <button class="nav-btn active" onclick="showPage('assign', this)">
+          <button
+            class="nav-btn active"
+            onclick="showAssignMode('regular', this)"
+          >
             Assign SO
+          </button>
+          <button class="nav-btn" onclick="showAssignMode('receh', this)">
+            Assign SO Receh
           </button>
           <button class="nav-btn" onclick="showPage('report-hourly', this)">
             Report Hourly
@@ -1924,6 +1930,27 @@
                     ></div>
                   </div>
                 </div>
+              </div>
+              <div
+                id="assign-mode-card"
+                style="
+                  background: var(--bg2);
+                  border: 1px solid var(--border);
+                  border-radius: 8px;
+                  padding: 10px 12px;
+                  margin-bottom: 12px;
+                  font-family: var(--mono);
+                  font-size: 10px;
+                  color: var(--text2);
+                  line-height: 1.5;
+                "
+              >
+                <strong id="assign-mode-title" style="color: var(--blue)"
+                  >ASSIGN SO REGULAR</strong
+                ><br />
+                <span id="assign-mode-sub"
+                  >Exclude SO receh dengan total qty ≤ 5 pcs.</span
+                >
               </div>
               <div class="control-panel-new">
                 <div>
@@ -2906,6 +2933,7 @@
           hourlyReportData = null,
           pickerProgressRows = [],
           lastZonePlannerRows = [],
+          assignMode = "regular",
           filterStateReady = { wave: false, type: false };
         function esc(s) {
           if (!s) return "";
@@ -3103,13 +3131,52 @@
             .querySelectorAll(".nav-btn")
             .forEach((x) => x.classList.remove("active"));
           document.getElementById("page-" + p).classList.add("active");
-          btn.classList.add("active");
-          if (p === "dashboard") renderHourlyReport();
+          if (btn) btn.classList.add("active");
+          if (p === "dashboard") renderDashboard();
+          if (p === "assign") updateAssignModeUI();
           if (p === "report-hourly") {
-            renderDashboard();
+            renderHourlyReport();
             renderPickerProgressControl();
           }
         }
+        function showAssignMode(mode, btn) {
+          assignMode = mode === "receh" ? "receh" : "regular";
+          document
+            .querySelectorAll(".page")
+            .forEach((x) => x.classList.remove("active"));
+          document
+            .querySelectorAll(".nav-btn")
+            .forEach((x) => x.classList.remove("active"));
+          document.getElementById("page-assign").classList.add("active");
+          if (btn) btn.classList.add("active");
+          assignResult = {};
+          assignSkippedRows = [];
+          assignForcedRows = [];
+          lastBackendAssignedRows = [];
+          lastBackendAssignSummary = null;
+          updateAssignModeUI();
+          updateFilterCount();
+        }
+
+        function updateAssignModeUI() {
+          const isReceh = isCurrentAssignModeReceh();
+          const title = document.getElementById("assign-mode-title");
+          const sub = document.getElementById("assign-mode-sub");
+          const empty = document.querySelector("#ap-right .empty-txt");
+          if (title)
+            title.innerText = isReceh ? "ASSIGN SO RECEH" : "ASSIGN SO REGULAR";
+          if (sub) {
+            sub.innerText = isReceh
+              ? "Khusus SO receh: 1 SO dengan total qty ≤ 5 pcs."
+              : "Exclude SO receh dengan total qty ≤ 5 pcs.";
+          }
+          if (empty && !hasAssignmentPreview()) {
+            empty.innerHTML = isReceh
+              ? "Set filter & picker di panel kiri<br />lalu klik <strong>ASSIGN RECEH</strong>"
+              : "Set filter & picker di panel kiri<br />lalu klik <strong>ASSIGN SEKARANG</strong>";
+          }
+        }
+
         function isPreviewSandbox() {
           const h = (location.hostname || "").toLowerCase();
           let f = false;
@@ -3701,13 +3768,14 @@
         function renderAssignHome() {
           const container = document.getElementById("ap-right");
           if (!container || hasAssignmentPreview()) return;
+          const isReceh = isCurrentAssignModeReceh();
           container.innerHTML = `<div class="empty">
               <div class="empty-icon">🎯</div>
               <div class="empty-txt">
-                Set filter & picker di panel kiri<br />lalu klik
-                <strong>ASSIGN SEKARANG</strong>
+                ${isReceh ? "Set filter & picker di panel kiri<br />lalu klik <strong>ASSIGN RECEH</strong>" : "Set filter & picker di panel kiri<br />lalu klik <strong>ASSIGN SEKARANG</strong>"}
               </div>
             </div>`;
+          updateAssignModeUI();
         }
         function viewZoneSO(zone) {
           const rows = getAssignablePool()
@@ -3972,40 +4040,32 @@
           updateFilterCount();
         }
         function updateFilterCount() {
+          const grouped = getGroupedSOList(soData);
+          const modeGroups = grouped.filter((s) => isSOForCurrentAssignMode(s));
+          const assignableGroups = modeGroups.filter((s) => s._all_assignable);
           let c = 0,
-            q = 0,
-            u = 0;
-          soData.forEach((s) => {
+            q = 0;
+          assignableGroups.forEach((s) => {
             const w = s.WAVE || getWave(s.destination_name);
             const t = s.type || getType(s.destination_name);
-            if (isAssignableSO(s)) u++;
-            if (
-              isAssignableSO(s) &&
-              fWave.has(w) &&
-              fType.has(t) &&
-              fZone.has(s.picking_zone)
-            ) {
+            if (fWave.has(w) && fType.has(t) && fZone.has(s.picking_zone)) {
               c++;
-              q += s.request_quantity;
+              q += Number(s.request_quantity || 0);
             }
           });
-          document.getElementById("s-total").innerText = soData.length;
-          document.getElementById("s-new").innerText = u;
+          document.getElementById("s-total").innerText = modeGroups.length;
+          document.getElementById("s-new").innerText = assignableGroups.length;
           document.getElementById("f-count").innerText = c;
           document.getElementById("f-qty").innerText =
             q.toLocaleString("id-ID") + " qty tersedia";
+          updateAssignModeUI();
           renderAssignHome();
         }
         function getAssignablePool() {
-          return soData.filter((s) => {
+          return getAssignableGroupsForMode().filter((s) => {
             const w = s.WAVE || getWave(s.destination_name);
             const t = s.type || getType(s.destination_name);
-            return (
-              isAssignableSO(s) &&
-              fWave.has(w) &&
-              fType.has(t) &&
-              fZone.has(s.picking_zone)
-            );
+            return fWave.has(w) && fType.has(t) && fZone.has(s.picking_zone);
           });
         }
         function getInitialWorkload(pList) {
@@ -4107,11 +4167,18 @@
           }
           const c = getAssignablePool().length;
           if (!c) {
-            alert("Gak ada SO NEW yang lolos filter.");
+            alert(
+              isCurrentAssignModeReceh()
+                ? "Gak ada SO receh NEW yang lolos filter."
+                : "Gak ada SO regular NEW yang lolos filter.",
+            );
             return;
           }
+          const modeLabel = isCurrentAssignModeReceh()
+            ? "SO receh qty ≤ 5 pcs"
+            : "SO regular qty > 5 pcs";
           document.getElementById("modal-body").innerHTML =
-            `Sistem akan membuat preview assignment berbasis <strong>target zone</strong> untuk <strong>${c} SO</strong> ke <strong>${myPickers.size} picker</strong>.<br><br>Chamber: <strong>1.500</strong>/picker · Ambient/Glassdoor: <strong>2.400</strong>/picker. Lanjutkan?`;
+            `Sistem akan membuat preview assignment untuk <strong>${c} ${modeLabel}</strong> ke <strong>${myPickers.size} picker</strong>.<br><br>Data sudah dibuat unique per SO, bukan per SKU/baris. Lanjutkan?`;
           document.getElementById("modal").classList.add("open");
         }
         function closeModal() {
@@ -4148,9 +4215,11 @@
             );
           }
           addLog(
-            "Zone Assign Preview: " +
+            "Assign Preview (" +
+              (isCurrentAssignModeReceh() ? "receh" : "regular") +
+              "): " +
               assigned +
-              " SO assigned · " +
+              " unique SO assigned · " +
               assignSkippedRows.length +
               " skipped",
             "ok",
@@ -4210,10 +4279,79 @@
           );
         }
         function extractWmsSoId(s) {
-          return String(s || "")
-            .replace(/\D/g, "")
-            .slice(-7)
-            .padStart(7, "0");
+          const digits = String(s || "").replace(/\D/g, "");
+          if (!digits) return "";
+          return digits.slice(-7).padStart(7, "0");
+        }
+
+        function getSOAssignKey(s) {
+          const raw = String(s?.so_number || s?.SO || s?.so || "").trim();
+          const wms = extractWmsSoId(raw);
+          return wms || raw;
+        }
+
+        function getGroupedSOList(rows = soData) {
+          const map = new Map();
+          (rows || []).forEach((s) => {
+            const key = getSOAssignKey(s);
+            if (!key) return;
+            if (!map.has(key)) {
+              map.set(key, {
+                ...s,
+                _so_key: key,
+                _source_rows: [],
+                request_quantity: 0,
+                sku_count: 0,
+                _all_assignable: true,
+              });
+            }
+            const g = map.get(key);
+            g._source_rows.push(s);
+            g.request_quantity += Number(s.request_quantity || 0) || 0;
+            g.sku_count += Number(s.sku_count || 0) || 1;
+            if (!g.destination_name && s.destination_name)
+              g.destination_name = s.destination_name;
+            if (!g.picking_zone && s.picking_zone)
+              g.picking_zone = s.picking_zone;
+            if (!g.WAVE && s.WAVE) g.WAVE = s.WAVE;
+            if (!g.type && s.type) g.type = s.type;
+            if (!isAssignableSO(s)) g._all_assignable = false;
+          });
+          return [...map.values()];
+        }
+
+        function isRecehSO(s) {
+          return Number(s?.request_quantity || 0) <= 5;
+        }
+
+        function isCurrentAssignModeReceh() {
+          return assignMode === "receh";
+        }
+
+        function isSOForCurrentAssignMode(s) {
+          return isCurrentAssignModeReceh() ? isRecehSO(s) : !isRecehSO(s);
+        }
+
+        function getAssignableGroupsForMode() {
+          return getGroupedSOList(soData).filter(
+            (s) => s._all_assignable && isSOForCurrentAssignMode(s),
+          );
+        }
+
+        function dedupeAssignedRows(rows) {
+          const seen = new Set();
+          const out = [];
+          (rows || []).forEach((x) => {
+            const soId = extractWmsSoId(x?.so?.so_number || x?.so_number || "");
+            const staffId = String(
+              x?.staff_id || x?.local_staff_id || "",
+            ).trim();
+            const key = soId + "|" + staffId;
+            if (!soId || seen.has(key)) return;
+            seen.add(key);
+            out.push(x);
+          });
+          return out;
         }
 
         function csvEscape(v) {
@@ -4257,18 +4395,17 @@
 
         function buildUploadCopyText(rows) {
           const out = ["error_message;so_id;staff_id"];
-          rows.forEach((x) => {
+          dedupeAssignedRows(rows).forEach((x) => {
             out.push(
               ["", extractWmsSoId(x.so.so_number), x.staff_id || ""].join(";"),
             );
           });
           return out.join("\n");
         }
-
         function buildWmsCsvText(rows) {
           const out = ["error_message;so_id;staff_id"];
 
-          rows.forEach((x) => {
+          dedupeAssignedRows(rows).forEach((x) => {
             out.push(
               [
                 csvEscape(""),
@@ -4468,6 +4605,17 @@
               });
             });
           });
+
+          const uniquePayloadMap = new Map();
+          payload.forEach((x) => {
+            const key =
+              extractWmsSoId(x.so_number) +
+              "|" +
+              String(x.staff_id || "").trim();
+            if (!uniquePayloadMap.has(key)) uniquePayloadMap.set(key, x);
+          });
+          payload.length = 0;
+          payload.push(...uniquePayloadMap.values());
 
           if (!payload.length) {
             alert("Belum ada SO hasil alokasi.");
@@ -5528,7 +5676,7 @@
         }
 
         function downloadCSV() {
-          const rows = buildBackendAssignedRows();
+          const rows = dedupeAssignedRows(buildBackendAssignedRows());
 
           if (!rows.length) {
             alert(
@@ -5563,15 +5711,16 @@
             const csvText = buildWmsCsvText(g.rows);
             const safeWave = safeFilePart(g.wave);
             const safeType = safeFilePart(g.type);
+            const safeMode = isCurrentAssignModeReceh() ? "receh" : "regular";
 
             downloadBlobFile(
               csvText,
-              `wms_pgs_${safeWave}_${safeType}_${new Date().toISOString().slice(0, 10)}.csv`,
+              `wms_pgs_${safeMode}_${safeWave}_${safeType}_${new Date().toISOString().slice(0, 10)}.csv`,
             );
           });
 
           addLog(
-            `CSV backend assigned downloaded: ${groups.length} file · ${rows.length} SO · split by wave & type`,
+            `CSV backend assigned downloaded: ${groups.length} file · ${rows.length} unique SO · split by wave & type`,
             "ok",
           );
         }

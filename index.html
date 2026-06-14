@@ -1830,14 +1830,8 @@
           <button class="nav-btn" onclick="showPage('so', this)">
             Data SO
           </button>
-          <button
-            class="nav-btn active"
-            onclick="showAssignMode('regular', this)"
-          >
+          <button class="nav-btn active" onclick="showPage('assign', this)">
             Assign SO
-          </button>
-          <button class="nav-btn" onclick="showAssignMode('receh', this)">
-            Assign SO Receh
           </button>
           <button class="nav-btn" onclick="showPage('report-hourly', this)">
             Report Hourly
@@ -1930,27 +1924,6 @@
                     ></div>
                   </div>
                 </div>
-              </div>
-              <div
-                id="assign-mode-card"
-                style="
-                  background: var(--bg2);
-                  border: 1px solid var(--border);
-                  border-radius: 8px;
-                  padding: 10px 12px;
-                  margin-bottom: 12px;
-                  font-family: var(--mono);
-                  font-size: 10px;
-                  color: var(--text2);
-                  line-height: 1.5;
-                "
-              >
-                <strong id="assign-mode-title" style="color: var(--blue)"
-                  >ASSIGN SO REGULAR</strong
-                ><br />
-                <span id="assign-mode-sub"
-                  >Exclude SO receh dengan total qty ≤ 5 pcs.</span
-                >
               </div>
               <div class="control-panel-new">
                 <div>
@@ -2933,7 +2906,6 @@
           hourlyReportData = null,
           pickerProgressRows = [],
           lastZonePlannerRows = [],
-          assignMode = "regular",
           filterStateReady = { wave: false, type: false };
         function esc(s) {
           if (!s) return "";
@@ -3131,52 +3103,13 @@
             .querySelectorAll(".nav-btn")
             .forEach((x) => x.classList.remove("active"));
           document.getElementById("page-" + p).classList.add("active");
-          if (btn) btn.classList.add("active");
-          if (p === "dashboard") renderDashboard();
-          if (p === "assign") updateAssignModeUI();
+          btn.classList.add("active");
+          if (p === "dashboard") renderHourlyReport();
           if (p === "report-hourly") {
-            renderHourlyReport();
+            renderDashboard();
             renderPickerProgressControl();
           }
         }
-        function showAssignMode(mode, btn) {
-          assignMode = mode === "receh" ? "receh" : "regular";
-          document
-            .querySelectorAll(".page")
-            .forEach((x) => x.classList.remove("active"));
-          document
-            .querySelectorAll(".nav-btn")
-            .forEach((x) => x.classList.remove("active"));
-          document.getElementById("page-assign").classList.add("active");
-          if (btn) btn.classList.add("active");
-          assignResult = {};
-          assignSkippedRows = [];
-          assignForcedRows = [];
-          lastBackendAssignedRows = [];
-          lastBackendAssignSummary = null;
-          updateAssignModeUI();
-          updateFilterCount();
-        }
-
-        function updateAssignModeUI() {
-          const isReceh = isCurrentAssignModeReceh();
-          const title = document.getElementById("assign-mode-title");
-          const sub = document.getElementById("assign-mode-sub");
-          const empty = document.querySelector("#ap-right .empty-txt");
-          if (title)
-            title.innerText = isReceh ? "ASSIGN SO RECEH" : "ASSIGN SO REGULAR";
-          if (sub) {
-            sub.innerText = isReceh
-              ? "Khusus SO receh: 1 SO dengan total qty ≤ 5 pcs."
-              : "Exclude SO receh dengan total qty ≤ 5 pcs.";
-          }
-          if (empty && !hasAssignmentPreview()) {
-            empty.innerHTML = isReceh
-              ? "Set filter & picker di panel kiri<br />lalu klik <strong>ASSIGN RECEH</strong>"
-              : "Set filter & picker di panel kiri<br />lalu klik <strong>ASSIGN SEKARANG</strong>";
-          }
-        }
-
         function isPreviewSandbox() {
           const h = (location.hostname || "").toLowerCase();
           let f = false;
@@ -3768,14 +3701,13 @@
         function renderAssignHome() {
           const container = document.getElementById("ap-right");
           if (!container || hasAssignmentPreview()) return;
-          const isReceh = isCurrentAssignModeReceh();
           container.innerHTML = `<div class="empty">
               <div class="empty-icon">🎯</div>
               <div class="empty-txt">
-                ${isReceh ? "Set filter & picker di panel kiri<br />lalu klik <strong>ASSIGN RECEH</strong>" : "Set filter & picker di panel kiri<br />lalu klik <strong>ASSIGN SEKARANG</strong>"}
+                Set filter & picker di panel kiri<br />lalu klik
+                <strong>ASSIGN SEKARANG</strong>
               </div>
             </div>`;
-          updateAssignModeUI();
         }
         function viewZoneSO(zone) {
           const rows = getAssignablePool()
@@ -4040,32 +3972,40 @@
           updateFilterCount();
         }
         function updateFilterCount() {
-          const grouped = getGroupedSOList(soData);
-          const modeGroups = grouped.filter((s) => isSOForCurrentAssignMode(s));
-          const assignableGroups = modeGroups.filter((s) => s._all_assignable);
           let c = 0,
-            q = 0;
-          assignableGroups.forEach((s) => {
+            q = 0,
+            u = 0;
+          soData.forEach((s) => {
             const w = s.WAVE || getWave(s.destination_name);
             const t = s.type || getType(s.destination_name);
-            if (fWave.has(w) && fType.has(t) && fZone.has(s.picking_zone)) {
+            if (isAssignableSO(s)) u++;
+            if (
+              isAssignableSO(s) &&
+              fWave.has(w) &&
+              fType.has(t) &&
+              fZone.has(s.picking_zone)
+            ) {
               c++;
-              q += Number(s.request_quantity || 0);
+              q += s.request_quantity;
             }
           });
-          document.getElementById("s-total").innerText = modeGroups.length;
-          document.getElementById("s-new").innerText = assignableGroups.length;
+          document.getElementById("s-total").innerText = soData.length;
+          document.getElementById("s-new").innerText = u;
           document.getElementById("f-count").innerText = c;
           document.getElementById("f-qty").innerText =
             q.toLocaleString("id-ID") + " qty tersedia";
-          updateAssignModeUI();
           renderAssignHome();
         }
         function getAssignablePool() {
-          return getAssignableGroupsForMode().filter((s) => {
+          return soData.filter((s) => {
             const w = s.WAVE || getWave(s.destination_name);
             const t = s.type || getType(s.destination_name);
-            return fWave.has(w) && fType.has(t) && fZone.has(s.picking_zone);
+            return (
+              isAssignableSO(s) &&
+              fWave.has(w) &&
+              fType.has(t) &&
+              fZone.has(s.picking_zone)
+            );
           });
         }
         function getInitialWorkload(pList) {
@@ -4167,18 +4107,11 @@
           }
           const c = getAssignablePool().length;
           if (!c) {
-            alert(
-              isCurrentAssignModeReceh()
-                ? "Gak ada SO receh NEW yang lolos filter."
-                : "Gak ada SO regular NEW yang lolos filter.",
-            );
+            alert("Gak ada SO NEW yang lolos filter.");
             return;
           }
-          const modeLabel = isCurrentAssignModeReceh()
-            ? "SO receh qty ≤ 5 pcs"
-            : "SO regular qty > 5 pcs";
           document.getElementById("modal-body").innerHTML =
-            `Sistem akan membuat preview assignment untuk <strong>${c} ${modeLabel}</strong> ke <strong>${myPickers.size} picker</strong>.<br><br>Data sudah dibuat unique per SO, bukan per SKU/baris. Lanjutkan?`;
+            `Sistem akan membuat preview assignment berbasis <strong>target zone</strong> untuk <strong>${c} SO</strong> ke <strong>${myPickers.size} picker</strong>.<br><br>Chamber: <strong>1.500</strong>/picker · Ambient/Glassdoor: <strong>2.400</strong>/picker. Lanjutkan?`;
           document.getElementById("modal").classList.add("open");
         }
         function closeModal() {
@@ -4215,11 +4148,9 @@
             );
           }
           addLog(
-            "Assign Preview (" +
-              (isCurrentAssignModeReceh() ? "receh" : "regular") +
-              "): " +
+            "Zone Assign Preview: " +
               assigned +
-              " unique SO assigned · " +
+              " SO assigned · " +
               assignSkippedRows.length +
               " skipped",
             "ok",
@@ -4279,79 +4210,10 @@
           );
         }
         function extractWmsSoId(s) {
-          const digits = String(s || "").replace(/\D/g, "");
-          if (!digits) return "";
-          return digits.slice(-7).padStart(7, "0");
-        }
-
-        function getSOAssignKey(s) {
-          const raw = String(s?.so_number || s?.SO || s?.so || "").trim();
-          const wms = extractWmsSoId(raw);
-          return wms || raw;
-        }
-
-        function getGroupedSOList(rows = soData) {
-          const map = new Map();
-          (rows || []).forEach((s) => {
-            const key = getSOAssignKey(s);
-            if (!key) return;
-            if (!map.has(key)) {
-              map.set(key, {
-                ...s,
-                _so_key: key,
-                _source_rows: [],
-                request_quantity: 0,
-                sku_count: 0,
-                _all_assignable: true,
-              });
-            }
-            const g = map.get(key);
-            g._source_rows.push(s);
-            g.request_quantity += Number(s.request_quantity || 0) || 0;
-            g.sku_count += Number(s.sku_count || 0) || 1;
-            if (!g.destination_name && s.destination_name)
-              g.destination_name = s.destination_name;
-            if (!g.picking_zone && s.picking_zone)
-              g.picking_zone = s.picking_zone;
-            if (!g.WAVE && s.WAVE) g.WAVE = s.WAVE;
-            if (!g.type && s.type) g.type = s.type;
-            if (!isAssignableSO(s)) g._all_assignable = false;
-          });
-          return [...map.values()];
-        }
-
-        function isRecehSO(s) {
-          return Number(s?.request_quantity || 0) <= 5;
-        }
-
-        function isCurrentAssignModeReceh() {
-          return assignMode === "receh";
-        }
-
-        function isSOForCurrentAssignMode(s) {
-          return isCurrentAssignModeReceh() ? isRecehSO(s) : !isRecehSO(s);
-        }
-
-        function getAssignableGroupsForMode() {
-          return getGroupedSOList(soData).filter(
-            (s) => s._all_assignable && isSOForCurrentAssignMode(s),
-          );
-        }
-
-        function dedupeAssignedRows(rows) {
-          const seen = new Set();
-          const out = [];
-          (rows || []).forEach((x) => {
-            const soId = extractWmsSoId(x?.so?.so_number || x?.so_number || "");
-            const staffId = String(
-              x?.staff_id || x?.local_staff_id || "",
-            ).trim();
-            const key = soId + "|" + staffId;
-            if (!soId || seen.has(key)) return;
-            seen.add(key);
-            out.push(x);
-          });
-          return out;
+          return String(s || "")
+            .replace(/\D/g, "")
+            .slice(-7)
+            .padStart(7, "0");
         }
 
         function csvEscape(v) {
@@ -4395,17 +4257,18 @@
 
         function buildUploadCopyText(rows) {
           const out = ["error_message;so_id;staff_id"];
-          dedupeAssignedRows(rows).forEach((x) => {
+          rows.forEach((x) => {
             out.push(
               ["", extractWmsSoId(x.so.so_number), x.staff_id || ""].join(";"),
             );
           });
           return out.join("\n");
         }
+
         function buildWmsCsvText(rows) {
           const out = ["error_message;so_id;staff_id"];
 
-          dedupeAssignedRows(rows).forEach((x) => {
+          rows.forEach((x) => {
             out.push(
               [
                 csvEscape(""),
@@ -4605,17 +4468,6 @@
               });
             });
           });
-
-          const uniquePayloadMap = new Map();
-          payload.forEach((x) => {
-            const key =
-              extractWmsSoId(x.so_number) +
-              "|" +
-              String(x.staff_id || "").trim();
-            if (!uniquePayloadMap.has(key)) uniquePayloadMap.set(key, x);
-          });
-          payload.length = 0;
-          payload.push(...uniquePayloadMap.values());
 
           if (!payload.length) {
             alert("Belum ada SO hasil alokasi.");
@@ -4931,12 +4783,81 @@
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;");
         }
+        function getDashboardSOKey(row, fallbackIndex = 0) {
+          const raw = String(row?.so_number || "").trim();
+          const id = extractWmsSoId(raw);
+          if (id && id !== "0000000") return id;
+          return raw || `ROW_${fallbackIndex}`;
+        }
+
+        function buildDashboardUniqueSO(rows) {
+          const map = new Map();
+          (Array.isArray(rows) ? rows : []).forEach((s, idx) => {
+            const key = getDashboardSOKey(s, idx);
+            const req = Number(s.request_quantity || 0) || 0;
+            const inc = Number(s.incoming_quantity || 0) || 0;
+            const sku = Number(s.sku_count || 0) || 0;
+            const status =
+              String(s.status || "NEW")
+                .toUpperCase()
+                .trim() || "NEW";
+            const wave = s.WAVE || getWave(s.destination_name);
+            const type = s.type || getType(s.destination_name);
+            const zone = s.picking_zone || "UNZONED";
+
+            if (!map.has(key)) {
+              map.set(key, {
+                ...s,
+                dashboard_so_id: key,
+                request_quantity: 0,
+                incoming_quantity: 0,
+                sku_count: 0,
+                row_count: 0,
+                status,
+                WAVE: wave,
+                type,
+                picking_zone: zone,
+              });
+            }
+
+            const d = map.get(key);
+            d.request_quantity += req;
+            d.incoming_quantity += inc;
+            d.sku_count += sku || 1;
+            d.row_count += 1;
+
+            if (!d.destination_name && s.destination_name)
+              d.destination_name = s.destination_name;
+            if (!d.Picker && s.Picker) d.Picker = s.Picker;
+            if (!d.staff_id && s.staff_id) d.staff_id = s.staff_id;
+            if (!d.picking_zone && zone) d.picking_zone = zone;
+            if (!d.WAVE && wave) d.WAVE = wave;
+            if (!d.type && type) d.type = type;
+
+            // Ambil status paling maju untuk SO yang sama supaya status chart tidak double count.
+            if (statusSortRank(status) > statusSortRank(d.status)) {
+              d.status = status;
+            }
+          });
+          return [...map.values()];
+        }
+
+        function setDashboardText(id, value) {
+          const el = document.getElementById(id);
+          if (el) el.innerText = value;
+        }
+
         function renderDashboard() {
           if (!soData.length) return;
           if (!dashboardFiltersReady) populateDashboardFilters();
+
           const dd = getDashboardFilteredData();
-          updateDashboardFilterBadge(soData.length, dd.length);
-          if (!dd.length) {
+          const uniqueAll = buildDashboardUniqueSO(soData);
+          const uniqueDD = buildDashboardUniqueSO(dd);
+
+          updateDashboardFilterBadge(uniqueAll.length, uniqueDD.length);
+
+          if (!uniqueDD.length) {
             [
               "d-ratio",
               "d-qty",
@@ -4961,6 +4882,7 @@
               pb.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text3)">Tidak ada data sesuai filter</td></tr>`;
             return;
           }
+
           let tq = 0,
             pq = 0,
             iq = 0,
@@ -4970,6 +4892,7 @@
             rc = {},
             zw = {},
             tc = { Kepala: 0, Badan: 0, Ekor: 0, Other: 0 };
+
           getAllWaves().forEach((w) => {
             wso[w] = 0;
             wqty[w] = 0;
@@ -4977,66 +4900,90 @@
           getAllTypes().forEach((t) => {
             if (tc[t] === undefined) tc[t] = 0;
           });
-          dd.forEach((s) => {
+
+          uniqueDD.forEach((s) => {
             const req = Number(s.request_quantity || 0);
             const inc = Number(s.incoming_quantity || 0);
             const sku = Number(s.sku_count || 0);
             const st = String(s.status || "NEW")
               .toUpperCase()
               .trim();
+
             tq += req;
             iq += inc;
             tsk += sku;
             if (st !== "NEW") pq += req;
+
             const w = s.WAVE || getWave(s.destination_name);
             if (wso[w] !== undefined) {
               wso[w]++;
               wqty[w] += req;
             }
+
             const z = s.picking_zone || "UNZONED";
             zw[z] = (zw[z] || 0) + req;
+
             const t = s.type || getType(s.destination_name);
             if (tc[t] !== undefined) tc[t]++;
             else tc["Other"]++;
+
             rc[st] = (rc[st] || 0) + 1;
           });
+
+          const uniqueCount = uniqueDD.length;
           const sz = Object.keys(zw)
             .sort((a, b) => zw[b] - zw[a])
             .slice(0, 6);
           const rz = sz[0] || "-";
-          document.getElementById("d-ratio").innerText =
-            Math.round(tq / dd.length) || 0;
-          document.getElementById("d-qty").innerText =
-            tq.toLocaleString("id-ID");
-          document.getElementById("d-so").innerText = dd.length;
-          document.getElementById("d-prog").innerText =
-            (tq ? Math.round((pq / tq) * 100) : 0) + "%";
-          document.getElementById("d-fr").innerText =
-            (tq ? ((iq / tq) * 100).toFixed(1) : "0.0") + "%";
-          document.getElementById("d-kepala").innerText =
-            tc.Kepala.toLocaleString("id-ID");
-          document.getElementById("d-badan").innerText =
-            tc.Badan.toLocaleString("id-ID");
-          document.getElementById("d-ekor").innerText =
-            tc.Ekor.toLocaleString("id-ID");
-          document.getElementById("d-risk-zone").innerText = rz;
-          document.getElementById("d-risk-zone-sub").innerText =
-            (zw[rz] || 0).toLocaleString("id-ID") + " qty";
-          document.getElementById("d-avg-sku").innerText = dd.length
-            ? (tsk / dd.length).toFixed(1)
-            : "0.0";
-          document.getElementById("d-avg-qty").innerText =
-            (dd.length ? Math.round(tq / dd.length) : 0).toLocaleString(
+
+          setDashboardText("d-ratio", Math.round(tq / uniqueCount) || 0);
+          setDashboardText("d-qty", tq.toLocaleString("id-ID"));
+          setDashboardText("d-so", uniqueCount.toLocaleString("id-ID"));
+          setDashboardText(
+            "d-prog",
+            (tq ? Math.round((pq / tq) * 100) : 0) + "%",
+          );
+          setDashboardText(
+            "d-fr",
+            (tq ? ((iq / tq) * 100).toFixed(1) : "0.0") + "%",
+          );
+          setDashboardText(
+            "d-kepala",
+            (tc["DROP 1"] || tc.Kepala || 0).toLocaleString("id-ID"),
+          );
+          setDashboardText(
+            "d-badan",
+            (tc["DROP 2"] || tc.Badan || 0).toLocaleString("id-ID"),
+          );
+          setDashboardText(
+            "d-ekor",
+            (tc["DROP 3"] || tc.Ekor || 0).toLocaleString("id-ID"),
+          );
+          setDashboardText("d-risk-zone", rz);
+          setDashboardText(
+            "d-risk-zone-sub",
+            (zw[rz] || 0).toLocaleString("id-ID") + " qty",
+          );
+          setDashboardText(
+            "d-avg-sku",
+            uniqueCount ? (tsk / uniqueCount).toFixed(1) : "0.0",
+          );
+          setDashboardText(
+            "d-avg-qty",
+            (uniqueCount ? Math.round(tq / uniqueCount) : 0).toLocaleString(
               "id-ID",
-            ) + " avg qty/SO";
-          renderStatusMonitoring(dd);
+            ) + " avg qty/SO",
+          );
+
+          renderStatusMonitoring(uniqueDD);
+
           const wl = Object.keys(wso).filter((w) => wso[w] > 0 || wqty[w] > 0);
           buildChart(
             "c-wave-so",
             "bar",
             wl,
             wl.map((w) => wso[w]),
-            "SO Count",
+            "Unique SO Count",
             "#2563eb",
           );
           buildChart(
@@ -5063,44 +5010,49 @@
             "",
             COLORS,
           );
+
           let pm = {};
-          dd.forEach((s) => {
+          uniqueDD.forEach((s) => {
             if (!s.Picker) return;
             if (!pm[s.Picker]) pm[s.Picker] = { so: 0, qty: 0, staff_id: "" };
             if (s.staff_id && !pm[s.Picker].staff_id)
               pm[s.Picker].staff_id = s.staff_id;
             pm[s.Picker].so++;
-            pm[s.Picker].qty += s.request_quantity;
+            pm[s.Picker].qty += Number(s.request_quantity || 0) || 0;
           });
+
           const pb = document.getElementById("picker-tbody");
-          if (!Object.keys(pm).length) {
-            pb.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text3)">Belum ada data picker</td></tr>`;
-          } else {
-            pb.innerHTML = Object.keys(pm)
-              .sort((a, b) => pm[b].qty - pm[a].qty)
-              .map((p) => {
-                const d = pm[p];
-                const ach = Math.round((d.qty / 2400) * 100);
-                const ac = achievementClass(ach);
-                const al =
-                  ach >= 120
-                    ? `${ach}% · overload`
-                    : ach >= 100
-                      ? `${ach}% · good`
-                      : ach >= 80
-                        ? `${ach}% · watch`
-                        : `${ach}% · low`;
-                return `<tr><td class="mono" style="font-weight:600;color:var(--text2)">${esc(d.staff_id || getPickerStaffId(p) || "-")}</td><td style="font-weight:600">${esc(p)}</td><td class="mono" style="text-align:right">${d.so}</td><td class="mono" style="text-align:right">${Math.round(d.qty / d.so)}</td><td class="mono" style="text-align:right;font-weight:600;color:var(--green)">${d.qty.toLocaleString("id-ID")}</td><td class="mono" style="text-align:right;color:var(--text3)">2.400</td><td class="mono ${ac}" style="text-align:right;font-weight:700">${al}</td></tr>`;
-              })
-              .join("");
+          if (pb) {
+            if (!Object.keys(pm).length) {
+              pb.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text3)">Belum ada data picker</td></tr>`;
+            } else {
+              pb.innerHTML = Object.keys(pm)
+                .sort((a, b) => pm[b].qty - pm[a].qty)
+                .map((p) => {
+                  const d = pm[p];
+                  const ach = Math.round((d.qty / 2400) * 100);
+                  const ac = achievementClass(ach);
+                  const al =
+                    ach >= 120
+                      ? `${ach}% · overload`
+                      : ach >= 100
+                        ? `${ach}% · good`
+                        : ach >= 80
+                          ? `${ach}% · watch`
+                          : `${ach}% · low`;
+                  return `<tr><td class="mono" style="font-weight:600;color:var(--text2)">${esc(d.staff_id || getPickerStaffId(p) || "-")}</td><td style="font-weight:600">${esc(p)}</td><td class="mono" style="text-align:right">${d.so}</td><td class="mono" style="text-align:right">${Math.round(d.qty / d.so)}</td><td class="mono" style="text-align:right;font-weight:600;color:var(--green)">${d.qty.toLocaleString("id-ID")}</td><td class="mono" style="text-align:right;color:var(--text3)">2.400</td><td class="mono ${ac}" style="text-align:right;font-weight:700">${al}</td></tr>`;
+                })
+                .join("");
+            }
           }
-          renderPickerProgressControl(dd);
+
+          renderPickerProgressControl(uniqueDD);
           addLog(
             "Dashboard PGS rendered · " +
-              dd.length +
-              "/" +
-              soData.length +
-              " SO",
+              uniqueCount.toLocaleString("id-ID") +
+              " unique SO · " +
+              dd.length.toLocaleString("id-ID") +
+              " rows",
             "info",
           );
         }
@@ -5676,7 +5628,7 @@
         }
 
         function downloadCSV() {
-          const rows = dedupeAssignedRows(buildBackendAssignedRows());
+          const rows = buildBackendAssignedRows();
 
           if (!rows.length) {
             alert(
@@ -5711,16 +5663,15 @@
             const csvText = buildWmsCsvText(g.rows);
             const safeWave = safeFilePart(g.wave);
             const safeType = safeFilePart(g.type);
-            const safeMode = isCurrentAssignModeReceh() ? "receh" : "regular";
 
             downloadBlobFile(
               csvText,
-              `wms_pgs_${safeMode}_${safeWave}_${safeType}_${new Date().toISOString().slice(0, 10)}.csv`,
+              `wms_pgs_${safeWave}_${safeType}_${new Date().toISOString().slice(0, 10)}.csv`,
             );
           });
 
           addLog(
-            `CSV backend assigned downloaded: ${groups.length} file · ${rows.length} unique SO · split by wave & type`,
+            `CSV backend assigned downloaded: ${groups.length} file · ${rows.length} SO · split by wave & type`,
             "ok",
           );
         }

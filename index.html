@@ -2056,8 +2056,8 @@
                       />
                     </label>
                     <div class="logic-hint" id="prod-logic-hint">
-                      ON: target mengikuti profil produktivitas zone. OFF: semua
-                      SO pakai target manual di atas.
+                      ON: ikut Qty per picker manual. OFF: assign tanpa limit
+                      qty/PROD.
                     </div>
                   </div>
                 </div>
@@ -2938,42 +2938,36 @@
           CT2: "DROP 4",
         };
 
-        const ZONE_PROFILE_PGS = {
-          ABD2: { group: "Ambient", target: 2400, priority: 2 },
-          CHA2: { group: "Chamber", target: 1500, priority: 1 },
-          CHB2: { group: "Chamber", target: 1500, priority: 1 },
-          CHC2: { group: "Chamber", target: 1500, priority: 1 },
-          GDA1: { group: "Glassdoor", target: 2400, priority: 3 },
-          GDB1: { group: "Glassdoor", target: 2400, priority: 3 },
-          GDC1: { group: "Glassdoor", target: 2400, priority: 3 },
-          GDD1: { group: "Glassdoor", target: 2400, priority: 3 },
-          GDG1: { group: "Glassdoor", target: 2400, priority: 3 },
-        };
-        function getZoneProfile(zone) {
-          const z = String(zone || "")
-            .trim()
-            .toUpperCase();
-          return (
-            ZONE_PROFILE_PGS[z] || { group: "Other", target: 2400, priority: 9 }
-          );
-        }
-        function getZoneTarget(zone) {
-          return Number(getZoneProfile(zone).target || 2400);
-        }
         function isProdLogicEnabled() {
           const el = document.getElementById("prod-logic-toggle");
           return el ? Boolean(el.checked) : Boolean(useProdLogic);
         }
+        function getManualAssignTarget(fallbackTarget = 2400) {
+          const manual =
+            Number(document.getElementById("target")?.value) ||
+            Number(fallbackTarget || 2400) ||
+            2400;
+          return Number.isFinite(manual) && manual > 0 ? manual : 2400;
+        }
+        function getZoneProfile(zone) {
+          return {
+            group: "No Zone Rule",
+            target: getManualAssignTarget(),
+            priority: 9,
+          };
+        }
+        function getZoneTarget(zone) {
+          return getManualAssignTarget();
+        }
         function getAssignmentTargetForSO(s, fallbackTarget = 2400) {
-          const fallback = Number(fallbackTarget || 2400) || 2400;
-          if (!isProdLogicEnabled()) return fallback;
-          const zoneTarget = Number(getZoneTarget(s?.picking_zone));
-          return zoneTarget > 0 ? zoneTarget : fallback;
+          const fallback = getManualAssignTarget(fallbackTarget);
+          return isProdLogicEnabled() ? fallback : Number.POSITIVE_INFINITY;
         }
         function getProdLogicModeLabel() {
+          const target = getManualAssignTarget();
           return isProdLogicEnabled()
-            ? "PROD ON · target by zone profile"
-            : "PROD OFF · manual target only";
+            ? `PROD ON · limit ${target.toLocaleString("id-ID")} qty/picker`
+            : "PROD OFF · tanpa limit qty";
         }
         function updateProdLogicUI(persist = true) {
           const el = document.getElementById("prod-logic-toggle");
@@ -2981,8 +2975,8 @@
           const hint = document.getElementById("prod-logic-hint");
           if (hint) {
             hint.innerHTML = useProdLogic
-              ? "ON: Chamber 1.500 qty/picker, Ambient/Glassdoor/Other 2.400 qty/picker. Target manual jadi fallback."
-              : "OFF: semua SO dibagi pakai target manual di atas. Logic produktivitas zone di-bypass.";
+              ? "ON: assign mengikuti Qty per picker manual di atas. Tidak ada target per zone."
+              : "OFF: assign tanpa limit qty/PROD. Semua SO hasil filter tetap dibagi rata ke picker.";
             hint.style.color = useProdLogic ? "var(--green)" : "var(--amber)";
           }
           try {
@@ -3004,10 +2998,6 @@
           updateProdLogicUI(false);
         }
         function zoneClassName(zone) {
-          const g = String(getZoneProfile(zone).group || "Other").toLowerCase();
-          if (g === "chamber") return "chamber";
-          if (g === "ambient") return "ambient";
-          if (g === "glassdoor") return "glassdoor";
           return "other";
         }
 
@@ -3785,12 +3775,15 @@
           return Object.values(map)
             .map((z) => ({
               ...z,
-              need: Math.max(
-                1,
-                Math.ceil(
-                  Number(z.qty || 0) / Math.max(1, Number(z.target || 2400)),
-                ),
-              ),
+              need: isProdLogicEnabled()
+                ? Math.max(
+                    1,
+                    Math.ceil(
+                      Number(z.qty || 0) /
+                        Math.max(1, Number(z.target || 2400)),
+                    ),
+                  )
+                : 1,
             }))
             .sort((a, b) => {
               const pr = Number(a.priority || 9) - Number(b.priority || 9);
@@ -3817,19 +3810,17 @@
                 100,
                 Math.round((z.qty / Math.max(1, z.target * z.need)) * 100),
               );
-              const color =
-                z.group === "Chamber"
-                  ? "var(--amber)"
-                  : z.group === "Glassdoor"
-                    ? "var(--teal)"
-                    : "var(--blue)";
+              const color = "var(--blue)";
+              const zoneTargetLabel = isProdLogicEnabled()
+                ? `Limit<br><strong>${Number(z.target).toLocaleString("id-ID")}</strong>/picker`
+                : "Mode<br><strong>No Limit</strong>";
               return `<div class="zone-plan ${zoneClassName(z.zone)}">
                   <div class="zone-plan-top">
                     <div>
                       <div class="zone-plan-name">${esc(z.zone)}</div>
-                      <div class="zone-plan-group">${esc(z.group)}</div>
+                      <div class="zone-plan-group">No Zone Rule</div>
                     </div>
-                    <div class="zone-plan-target">Target<br><strong>${Number(z.target).toLocaleString("id-ID")}</strong>/picker</div>
+                    <div class="zone-plan-target">${zoneTargetLabel}</div>
                   </div>
                   <div class="zone-plan-metrics">
                     <div class="zone-plan-metric"><div class="zone-plan-label">SO</div><div class="zone-plan-val">${z.so.toLocaleString("id-ID")}</div></div>
@@ -3906,7 +3897,7 @@
               <div class="zone-detail-head">
                 <div>
                   <div class="zone-detail-title">Daftar SO · ${esc(zone)}</div>
-                  <div class="zone-detail-sub">${rows.length.toLocaleString("id-ID")} SO · ${qty.toLocaleString("id-ID")} qty · target ${getZoneTarget(zone).toLocaleString("id-ID")}/picker</div>
+                  <div class="zone-detail-sub">${rows.length.toLocaleString("id-ID")} SO · ${qty.toLocaleString("id-ID")} qty · ${isProdLogicEnabled() ? "limit " + getZoneTarget(zone).toLocaleString("id-ID") + "/picker" : "tanpa limit qty"}</div>
                 </div>
                 <button class="btn-cancel" onclick="closeZoneDetailModal()">Tutup</button>
               </div>
@@ -3986,13 +3977,17 @@
           pList.forEach((p) => {
             pickerZoneCounts[p] = {};
             assignResult[p].zone = "MIXED";
-            assignResult[p].zoneGroup = useProd
-              ? "PROD Logic"
-              : "Manual Target";
-            assignResult[p].zoneTarget = target;
-            assignResult[p].targetMode = useProd ? "PROD" : "MANUAL";
-            assignResult[p].targetMin = target;
-            assignResult[p].targetMax = target;
+            assignResult[p].zoneGroup = useProd ? "Limit Qty" : "No Limit";
+            assignResult[p].zoneTarget = useProd
+              ? target
+              : Number.POSITIVE_INFINITY;
+            assignResult[p].targetMode = useProd ? "PROD" : "NO_LIMIT";
+            assignResult[p].targetMin = useProd
+              ? target
+              : Number.POSITIVE_INFINITY;
+            assignResult[p].targetMax = useProd
+              ? target
+              : Number.POSITIVE_INFINITY;
           });
 
           mixedQueue.forEach((s) => {
@@ -4056,18 +4051,18 @@
             } else if (zones.length === 1) {
               assignResult[p].zone = zones[0];
               assignResult[p].zoneGroup = useProd
-                ? `Single Zone · PROD ${getZoneTarget(zones[0]).toLocaleString("id-ID")}`
-                : "Single Zone";
+                ? `Single Zone · Limit ${target.toLocaleString("id-ID")}`
+                : "Single Zone · No Limit";
             } else {
               assignResult[p].zone = `${zones.length} Zones`;
               assignResult[p].zoneGroup = useProd
-                ? "Mixed Random · PROD"
-                : "Mixed Random";
+                ? "Mixed Random · Limit Qty"
+                : "Mixed Random · No Limit";
             }
-            assignResult[p].targetMode = useProd ? "PROD" : "MANUAL";
-            assignResult[p].zoneTarget = Number(
-              assignResult[p].targetMax || target,
-            );
+            assignResult[p].targetMode = useProd ? "PROD" : "NO_LIMIT";
+            assignResult[p].zoneTarget = useProd
+              ? Number(assignResult[p].targetMax || target)
+              : Number.POSITIVE_INFINITY;
           });
 
           return {
@@ -4077,6 +4072,10 @@
           };
         }
         function getPickerCardTarget(d, fallback) {
+          if (d?.targetMode === "NO_LIMIT") {
+            const load = Number(d.totalQty || d.newQty || fallback || 0);
+            return Number.isFinite(load) && load > 0 ? load : 1;
+          }
           const n = Number(
             d.zoneTarget ||
               fallback ||
@@ -4086,15 +4085,13 @@
           return Number.isFinite(n) && n > 0 ? n : 2400;
         }
         function getPickerCardTargetLabel(d, fallback) {
+          if (d?.targetMode === "NO_LIMIT") return "No Limit";
           const maxTarget = getPickerCardTarget(d, fallback);
           const minTarget = Number(d?.targetMin || maxTarget);
-          if (d?.targetMode === "PROD") {
-            if (minTarget > 0 && minTarget !== maxTarget) {
-              return `${minTarget.toLocaleString("id-ID")}-${maxTarget.toLocaleString("id-ID")} PROD`;
-            }
-            return `${maxTarget.toLocaleString("id-ID")} PROD`;
+          if (minTarget > 0 && minTarget !== maxTarget) {
+            return `${minTarget.toLocaleString("id-ID")}-${maxTarget.toLocaleString("id-ID")} limit`;
           }
-          return maxTarget.toLocaleString("id-ID");
+          return `${maxTarget.toLocaleString("id-ID")} limit`;
         }
         function suggestSingleZone(zone) {
           const pList = getPickerNames();
@@ -4114,14 +4111,14 @@
             (a, d) => a + d.soList.length,
             0,
           );
-          const target = getZoneTarget(zone);
+          const target = getManualAssignTarget();
           addLog(
             "Suggest Zone " +
               zone +
               ": " +
               assigned +
-              " SO · target " +
-              target.toLocaleString("id-ID"),
+              " SO · " +
+              getProdLogicModeLabel(),
             "ok",
           );
           renderResultCards(target);
@@ -4344,7 +4341,7 @@
               assignSkippedRows.length +
                 " SO / " +
                 skippedQty.toLocaleString("id-ID") +
-                " qty di-skip (target full / picker kurang)",
+                " qty di-skip (limit qty full / picker kurang)",
               "warn",
             );
           }
@@ -4360,7 +4357,7 @@
               " skipped",
             "ok",
           );
-          renderResultCards(2400);
+          renderResultCards(getManualAssignTarget());
         }
         function extractWmsSoId(s) {
           const digits = String(s || "").replace(/\D/g, "");
@@ -4615,20 +4612,23 @@
             (a, s) => a + Number(s.request_quantity || 0),
             0,
           );
-          let html = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px;flex-wrap:wrap"><div><div style="font-weight:700;font-size:14px">Hasil Alokasi</div><div class="mono" style="font-size:10px;color:var(--text3);margin-top:2px">${totalSO.toLocaleString("id-ID")} SO assigned · ${totalQty.toLocaleString("id-ID")} qty · ${skipSO.toLocaleString("id-ID")} SO skipped · ${arr.length} picker · ${esc(assignModeLabel)}</div></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-ghost" onclick="copyAssignedGlobal('so',this,event)">📋 Copy All SO</button><button class="btn-ghost" onclick="copyAssignedGlobal('upload',this,event)">📋 Copy WMS Format</button><button class="btn-ghost" onclick="submitToGoogle()" style="background:var(--green);color:#fff;border:none;font-weight:600;padding:6px 12px">💾 Simpan ke Google Sheets</button></div></div>${skipSO ? `<div style="margin-bottom:12px;background:var(--amber-dim);border:1px solid var(--amber-light);color:var(--amber);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:11px">⚠️ ${skipSO} SO / ${skipQty.toLocaleString("id-ID")} qty di-skip (target full / picker kurang)</div>` : ""}<div style="display:flex;flex-direction:column;gap:10px" id="picker-grid">`;
+          let html = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px;flex-wrap:wrap"><div><div style="font-weight:700;font-size:14px">Hasil Alokasi</div><div class="mono" style="font-size:10px;color:var(--text3);margin-top:2px">${totalSO.toLocaleString("id-ID")} SO assigned · ${totalQty.toLocaleString("id-ID")} qty · ${skipSO.toLocaleString("id-ID")} SO skipped · ${arr.length} picker · ${esc(assignModeLabel)}</div></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-ghost" onclick="copyAssignedGlobal('so',this,event)">📋 Copy All SO</button><button class="btn-ghost" onclick="copyAssignedGlobal('upload',this,event)">📋 Copy WMS Format</button><button class="btn-ghost" onclick="submitToGoogle()" style="background:var(--green);color:#fff;border:none;font-weight:600;padding:6px 12px">💾 Simpan ke Google Sheets</button></div></div>${skipSO ? `<div style="margin-bottom:12px;background:var(--amber-dim);border:1px solid var(--amber-light);color:var(--amber);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:11px">⚠️ ${skipSO} SO / ${skipQty.toLocaleString("id-ID")} qty di-skip (limit qty full / picker kurang)</div>` : ""}<div style="display:flex;flex-direction:column;gap:10px" id="picker-grid">`;
           arr.forEach((d, idx) => {
             const cardTarget = getPickerCardTarget(d, tgt);
             const cardTargetLabel = getPickerCardTargetLabel(d, tgt);
-            const pctRaw = Math.round(
-              (d.totalQty / Math.max(1, cardTarget)) * 100,
-            );
-            const pct = Math.min(100, pctRaw);
-            const isOver = d.totalQty > cardTarget;
-            const barColor = isOver
-              ? "var(--red)"
-              : pct > 80
-                ? "var(--amber)"
-                : "var(--green)";
+            const noLimit = d.targetMode === "NO_LIMIT";
+            const pctRaw = noLimit
+              ? 100
+              : Math.round((d.totalQty / Math.max(1, cardTarget)) * 100);
+            const pct = noLimit ? 100 : Math.min(100, pctRaw);
+            const isOver = !noLimit && d.totalQty > cardTarget;
+            const barColor = noLimit
+              ? "var(--blue)"
+              : isOver
+                ? "var(--red)"
+                : pct > 80
+                  ? "var(--amber)"
+                  : "var(--green)";
             let zs = {};
             d.soList.forEach((s) => {
               const z = s.picking_zone || "Unknown";
@@ -4661,7 +4661,7 @@
                 return `<tr><td class="mono">${esc(s.so_number)}</td><td style="font-weight:500">${esc(s.destination_name || "-")}</td><td class="mono"><span class="zone-badge">${esc(s.picking_zone || "-")}</span></td><td>${waveBadge(w)}</td><td><span class="badge ${badgeClass(t)}">${esc(t)}</span></td><td class="mono" style="text-align:right;font-weight:700">${Number(s.request_quantity || 0).toLocaleString("id-ID")}${s.force_assigned ? ' <span class="badge s-prog">forced</span>' : ""}</td></tr>`;
               })
               .join("");
-            html += `<div class="pc" data-picker="${esc(d.picker)}" data-staff-id="${esc(sid)}"><div class="pc-head" onclick="this.parentElement.classList.toggle('open')"><div class="pc-av" style="background:${COLORS[idx % COLORS.length]}22;color:${COLORS[idx % COLORS.length]}">${esc(d.picker.slice(0, 2).toUpperCase())}</div><div class="pc-info"><div class="pc-name">${esc(sid ? sid + " | " : "")}${esc(d.picker)}</div><div class="pc-meta">${d.zone && d.zone !== "-" ? esc(d.zone) + " · " : ""}${d.zoneGroup ? esc(d.zoneGroup) + " · " : ""}${d.soList.length.toLocaleString("id-ID")} SO baru · ${d.newQty.toLocaleString("id-ID")} qty · target ${cardTargetLabel}</div></div><div class="pc-right"><div style="text-align:right"><div class="pc-qty">${d.totalQty.toLocaleString("id-ID")} Qty</div><div class="pc-pct" style="color:${barColor};font-weight:600">${pctRaw}% dari target</div></div><div class="chevron">▼</div></div></div><div class="pc-bar"><div class="bar-bg"><div class="bar-fg" style="width:${pct}%;background:${barColor}"></div></div><div class="bar-lbl">(Beban: ${d.initialQty.toLocaleString("id-ID")} | Baru: +${d.newQty.toLocaleString("id-ID")})</div></div><div class="pc-detail"><div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--bg3)"><div style="display:flex;gap:5px;flex-wrap:wrap">${zChips || '<span class="mono" style="color:var(--text3)">No zone</span>'}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="copy-btn" onclick="copyAssignedPicker('so',this,event)">📋 Copy SO</button><button class="copy-btn" onclick="copyAssignedPicker('upload',this,event)">📋 Copy WMS</button><button class="copy-btn" onclick="downloadAssignedPickerCSV(this,event)">📥 CSV</button></div></div><div style="overflow:auto;max-height:420px"><table><thead><tr><th>SO Number</th><th>Destination</th><th>Zone</th><th>Wave</th><th>Drop</th><th style="text-align:right">Qty</th></tr></thead><tbody>${trows}</tbody></table></div></div></div>`;
+            html += `<div class="pc" data-picker="${esc(d.picker)}" data-staff-id="${esc(sid)}"><div class="pc-head" onclick="this.parentElement.classList.toggle('open')"><div class="pc-av" style="background:${COLORS[idx % COLORS.length]}22;color:${COLORS[idx % COLORS.length]}">${esc(d.picker.slice(0, 2).toUpperCase())}</div><div class="pc-info"><div class="pc-name">${esc(sid ? sid + " | " : "")}${esc(d.picker)}</div><div class="pc-meta">${d.zone && d.zone !== "-" ? esc(d.zone) + " · " : ""}${d.zoneGroup ? esc(d.zoneGroup) + " · " : ""}${d.soList.length.toLocaleString("id-ID")} SO baru · ${d.newQty.toLocaleString("id-ID")} qty · ${noLimit ? "mode No Limit" : "limit " + cardTargetLabel}</div></div><div class="pc-right"><div style="text-align:right"><div class="pc-qty">${d.totalQty.toLocaleString("id-ID")} Qty</div><div class="pc-pct" style="color:${barColor};font-weight:600">${noLimit ? "No limit" : pctRaw + "% dari limit"}</div></div><div class="chevron">▼</div></div></div><div class="pc-bar"><div class="bar-bg"><div class="bar-fg" style="width:${pct}%;background:${barColor}"></div></div><div class="bar-lbl">(Beban: ${d.initialQty.toLocaleString("id-ID")} | Baru: +${d.newQty.toLocaleString("id-ID")})</div></div><div class="pc-detail"><div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--bg3)"><div style="display:flex;gap:5px;flex-wrap:wrap">${zChips || '<span class="mono" style="color:var(--text3)">No zone</span>'}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="copy-btn" onclick="copyAssignedPicker('so',this,event)">📋 Copy SO</button><button class="copy-btn" onclick="copyAssignedPicker('upload',this,event)">📋 Copy WMS</button><button class="copy-btn" onclick="downloadAssignedPickerCSV(this,event)">📥 CSV</button></div></div><div style="overflow:auto;max-height:420px"><table><thead><tr><th>SO Number</th><th>Destination</th><th>Zone</th><th>Wave</th><th>Drop</th><th style="text-align:right">Qty</th></tr></thead><tbody>${trows}</tbody></table></div></div></div>`;
           });
           html += `</div>`;
           container.innerHTML = html;

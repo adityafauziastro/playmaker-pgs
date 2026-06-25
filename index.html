@@ -1071,27 +1071,6 @@
       .btn-mega-assign:active {
         transform: scale(0.98);
       }
-      .btn-suggest {
-        background: linear-gradient(135deg, #7c3aed, #2563eb);
-        color: #fff;
-        border: none;
-        border-radius: 10px;
-        padding: 12px;
-        font-size: 13px;
-        font-weight: 700;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        width: 100%;
-        transition: all 0.2s ease;
-        font-family: var(--mono);
-      }
-      .btn-suggest:hover {
-        filter: brightness(1.05);
-        transform: translateY(-1px);
-      }
       .btn-secondary-download {
         background: transparent;
         color: var(--text2);
@@ -1111,6 +1090,54 @@
       }
       .btn-secondary-download:hover {
         background: var(--bg3);
+      }
+      .btn-reset-lock {
+        background: var(--red-dim);
+        color: var(--red);
+        border: 1px solid var(--red-light);
+        border-radius: 8px;
+        padding: 9px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        transition:
+          background 0.2s,
+          transform 0.2s;
+        font-family: var(--mono);
+      }
+      .btn-reset-lock:hover {
+        background: var(--red-light);
+        transform: translateY(-1px);
+      }
+      .logic-toggle-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        width: 100%;
+        cursor: pointer;
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 800;
+        color: var(--text);
+      }
+      .logic-toggle-row input {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--green);
+        cursor: pointer;
+      }
+      .logic-hint {
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--text3);
+        line-height: 1.45;
+        width: 100%;
       }
       .modal-bg {
         position: fixed;
@@ -2010,6 +2037,31 @@
                   </div>
                 </div>
                 <div>
+                  <div class="panel-section-title">⚙️ Logic Assign</div>
+                  <div
+                    class="target-input-wrapper"
+                    style="
+                      flex-direction: column;
+                      align-items: stretch;
+                      gap: 8px;
+                    "
+                  >
+                    <label class="logic-toggle-row" for="prod-logic-toggle">
+                      <span>Pakai Logic PROD</span>
+                      <input
+                        type="checkbox"
+                        id="prod-logic-toggle"
+                        checked
+                        onchange="updateProdLogicUI()"
+                      />
+                    </label>
+                    <div class="logic-hint" id="prod-logic-hint">
+                      ON: target mengikuti profil produktivitas zone. OFF: semua
+                      SO pakai target manual di atas.
+                    </div>
+                  </div>
+                </div>
+                <div>
                   <div class="panel-section-title">🌊 Filter Wave</div>
                   <div class="filter-grid-3" id="fw"></div>
                 </div>
@@ -2080,12 +2132,6 @@
                   <div class="sub-label" id="f-qty">0 qty tersedia</div>
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 8px">
-                  <button
-                    class="btn-suggest"
-                    onclick="generateSmartSuggestion()"
-                  >
-                    🪄 SMART SUGGESTION
-                  </button>
                   <button class="btn-mega-assign" onclick="confirmAssign()">
                     🚀 ASSIGN SEKARANG
                   </button>
@@ -2094,6 +2140,12 @@
                     onclick="downloadCSV()"
                   >
                     📥 Download CSV
+                  </button>
+                  <button
+                    class="btn-reset-lock"
+                    onclick="resetAssignmentLock()"
+                  >
+                    ♻ Reset Lock Assignment
                   </button>
                 </div>
               </div>
@@ -2908,6 +2960,49 @@
         function getZoneTarget(zone) {
           return Number(getZoneProfile(zone).target || 2400);
         }
+        function isProdLogicEnabled() {
+          const el = document.getElementById("prod-logic-toggle");
+          return el ? Boolean(el.checked) : Boolean(useProdLogic);
+        }
+        function getAssignmentTargetForSO(s, fallbackTarget = 2400) {
+          const fallback = Number(fallbackTarget || 2400) || 2400;
+          if (!isProdLogicEnabled()) return fallback;
+          const zoneTarget = Number(getZoneTarget(s?.picking_zone));
+          return zoneTarget > 0 ? zoneTarget : fallback;
+        }
+        function getProdLogicModeLabel() {
+          return isProdLogicEnabled()
+            ? "PROD ON · target by zone profile"
+            : "PROD OFF · manual target only";
+        }
+        function updateProdLogicUI(persist = true) {
+          const el = document.getElementById("prod-logic-toggle");
+          if (el) useProdLogic = Boolean(el.checked);
+          const hint = document.getElementById("prod-logic-hint");
+          if (hint) {
+            hint.innerHTML = useProdLogic
+              ? "ON: Chamber 1.500 qty/picker, Ambient/Glassdoor/Other 2.400 qty/picker. Target manual jadi fallback."
+              : "OFF: semua SO dibagi pakai target manual di atas. Logic produktivitas zone di-bypass.";
+            hint.style.color = useProdLogic ? "var(--green)" : "var(--amber)";
+          }
+          try {
+            if (persist)
+              localStorage.setItem(
+                "playmaker_pgs_prod_logic",
+                useProdLogic ? "on" : "off",
+              );
+          } catch (e) {}
+          if (typeof updateAssignModeUI === "function") updateAssignModeUI();
+        }
+        function initProdLogicToggle() {
+          try {
+            const saved = localStorage.getItem("playmaker_pgs_prod_logic");
+            if (saved === "off") useProdLogic = false;
+          } catch (e) {}
+          const el = document.getElementById("prod-logic-toggle");
+          if (el) el.checked = useProdLogic;
+          updateProdLogicUI(false);
+        }
         function zoneClassName(zone) {
           const g = String(getZoneProfile(zone).group || "Other").toLowerCase();
           if (g === "chamber") return "chamber";
@@ -2933,6 +3028,7 @@
           hourlyReportData = null,
           pickerProgressRows = [],
           lastZonePlannerRows = [],
+          useProdLogic = true,
           assignMode = "regular",
           filterStateReady = { wave: false, type: false };
         function esc(s) {
@@ -3760,7 +3856,7 @@
                   <div class="zone-planner-title">Zone Workload Planner</div>
                   <div class="zone-planner-sub">${totalSO.toLocaleString("id-ID")} SO · ${totalQty.toLocaleString("id-ID")} qty · ideal ${totalNeed.toLocaleString("id-ID")} picker · ${shortage}</div>
                 </div>
-                <button class="btn-ghost" onclick="generateSmartSuggestion()">🪄 Suggest All Zone</button>
+                <div class="mono" style="font-size:10px;color:var(--text3)">${esc(getProdLogicModeLabel())}</div>
               </div>
               <div class="zone-planner-grid">${cards}</div>
             </div>`;
@@ -3832,7 +3928,7 @@
           initAssignResult(pList, iw);
           const target =
             Number(document.getElementById("target")?.value) || 2400;
-          const softTarget = Math.round(target * 1.1);
+          const useProd = isProdLogicEnabled();
           const singleZone = options.singleZone || "";
           const sourcePool = singleZone
             ? (pool || []).filter(
@@ -3890,20 +3986,28 @@
           pList.forEach((p) => {
             pickerZoneCounts[p] = {};
             assignResult[p].zone = "MIXED";
-            assignResult[p].zoneGroup = "Random Zone";
+            assignResult[p].zoneGroup = useProd
+              ? "PROD Logic"
+              : "Manual Target";
             assignResult[p].zoneTarget = target;
+            assignResult[p].targetMode = useProd ? "PROD" : "MANUAL";
+            assignResult[p].targetMin = target;
+            assignResult[p].targetMax = target;
           });
 
           mixedQueue.forEach((s) => {
             const sq = Number(s.request_quantity || 0);
             const z = String(s.picking_zone || "UNKNOWN").trim() || "UNKNOWN";
+            const rowTarget = getAssignmentTargetForSO(s, target);
+            const rowSoftTarget = Math.round(rowTarget * 1.1);
             let candidates = pList.filter(
-              (p) => Number(assignResult[p].totalQty || 0) + sq <= target,
+              (p) => Number(assignResult[p].totalQty || 0) + sq <= rowTarget,
             );
             let forced = false;
             if (!candidates.length) {
               candidates = pList.filter(
-                (p) => Number(assignResult[p].totalQty || 0) + sq <= softTarget,
+                (p) =>
+                  Number(assignResult[p].totalQty || 0) + sq <= rowSoftTarget,
               );
               forced = candidates.length > 0;
             }
@@ -3923,10 +4027,20 @@
             });
 
             const best = candidates[0];
-            const row = forced ? { ...s, force_assigned: true } : s;
+            const row = forced
+              ? { ...s, force_assigned: true, _assign_target: rowTarget }
+              : { ...s, _assign_target: rowTarget };
             assignResult[best].soList.push(row);
             assignResult[best].newQty += sq;
             assignResult[best].totalQty += sq;
+            assignResult[best].targetMin = Math.min(
+              Number(assignResult[best].targetMin || rowTarget),
+              rowTarget,
+            );
+            assignResult[best].targetMax = Math.max(
+              Number(assignResult[best].targetMax || rowTarget),
+              rowTarget,
+            );
             pickerZoneCounts[best][z] =
               Number(pickerZoneCounts[best][z] || 0) + 1;
             if (forced) assignForcedRows.push({ ...row, picker: best });
@@ -3941,12 +4055,19 @@
               assignResult[p].zoneGroup = "Idle";
             } else if (zones.length === 1) {
               assignResult[p].zone = zones[0];
-              assignResult[p].zoneGroup = "Single Zone";
+              assignResult[p].zoneGroup = useProd
+                ? `Single Zone · PROD ${getZoneTarget(zones[0]).toLocaleString("id-ID")}`
+                : "Single Zone";
             } else {
               assignResult[p].zone = `${zones.length} Zones`;
-              assignResult[p].zoneGroup = "Mixed Random";
+              assignResult[p].zoneGroup = useProd
+                ? "Mixed Random · PROD"
+                : "Mixed Random";
             }
-            assignResult[p].zoneTarget = target;
+            assignResult[p].targetMode = useProd ? "PROD" : "MANUAL";
+            assignResult[p].zoneTarget = Number(
+              assignResult[p].targetMax || target,
+            );
           });
 
           return {
@@ -3956,12 +4077,24 @@
           };
         }
         function getPickerCardTarget(d, fallback) {
-          return Number(
+          const n = Number(
             d.zoneTarget ||
               fallback ||
               document.getElementById("target")?.value ||
               2400,
           );
+          return Number.isFinite(n) && n > 0 ? n : 2400;
+        }
+        function getPickerCardTargetLabel(d, fallback) {
+          const maxTarget = getPickerCardTarget(d, fallback);
+          const minTarget = Number(d?.targetMin || maxTarget);
+          if (d?.targetMode === "PROD") {
+            if (minTarget > 0 && minTarget !== maxTarget) {
+              return `${minTarget.toLocaleString("id-ID")}-${maxTarget.toLocaleString("id-ID")} PROD`;
+            }
+            return `${maxTarget.toLocaleString("id-ID")} PROD`;
+          }
+          return maxTarget.toLocaleString("id-ID");
         }
         function suggestSingleZone(zone) {
           const pList = getPickerNames();
@@ -4179,7 +4312,7 @@
             ? "SO receh qty ≤ 5 pcs"
             : "SO regular qty > 5 pcs";
           document.getElementById("modal-body").innerHTML =
-            `Sistem akan membuat preview assignment untuk <strong>${c} ${modeLabel}</strong> ke <strong>${myPickers.size} picker</strong>.<br><br>Data sudah dibuat unique per SO, bukan per SKU/baris. Lanjutkan?`;
+            `Sistem akan membuat preview assignment untuk <strong>${c} ${modeLabel}</strong> ke <strong>${myPickers.size} picker</strong>.<br><br>Mode: <strong>${esc(getProdLogicModeLabel())}</strong><br><br>Data sudah dibuat unique per SO, bukan per SKU/baris. Lanjutkan?`;
           document.getElementById("modal").classList.add("open");
         }
         function closeModal() {
@@ -4218,6 +4351,8 @@
           addLog(
             "Assign Preview (" +
               (isCurrentAssignModeReceh() ? "receh" : "regular") +
+              " · " +
+              getProdLogicModeLabel() +
               "): " +
               assigned +
               " unique SO assigned · " +
@@ -4226,58 +4361,6 @@
             "ok",
           );
           renderResultCards(2400);
-        }
-        function generateSmartSuggestion() {
-          const pList = getPickerNames();
-          if (!pList.length) {
-            alert("Isi minimal 1 picker dulu!");
-            return;
-          }
-          const pool = getAssignablePool();
-          if (!pool.length) {
-            alert("Gak ada SO untuk di-assign.");
-            return;
-          }
-          const zones = buildZoneWorkload(pool);
-          const idealPickers = zones.reduce((a, z) => a + z.need, 0);
-          allocateZoneAware(pool, pList);
-          const assigned = Object.values(assignResult).reduce(
-            (a, d) => a + d.soList.length,
-            0,
-          );
-          const assignedQty = Object.values(assignResult).reduce(
-            (a, d) => a + Number(d.newQty || 0),
-            0,
-          );
-          const chamberQty = Object.values(assignResult)
-            .filter((d) => d.zoneGroup === "Chamber")
-            .reduce((a, d) => a + Number(d.newQty || 0), 0);
-          addLog(
-            "Smart Zone Suggestion: " +
-              assigned +
-              " SO · " +
-              assignedQty.toLocaleString("id-ID") +
-              " qty · " +
-              zones.length +
-              " zone",
-            "ok",
-          );
-          renderResultCards(2400);
-          alert(
-            "🪄 Smart Suggestion selesai.\n\nRule:\n- Qty tetap dibagi rata antar picker\n- Zone dibuat mixed/random, tidak dikunci 1 picker = 1 zone\n- SO locked/status non-NEW tetap exclude\n\nZone: " +
-              zones.length +
-              "\nIdeal picker: " +
-              idealPickers +
-              "\nPicker input: " +
-              pList.length +
-              "\nAssigned: " +
-              assigned +
-              " SO / " +
-              assignedQty.toLocaleString("id-ID") +
-              " qty\nSkipped: " +
-              assignSkippedRows.length +
-              " SO\n\nReview dulu sebelum Simpan ke Google Sheets.",
-          );
         }
         function extractWmsSoId(s) {
           const digits = String(s || "").replace(/\D/g, "");
@@ -4524,6 +4607,7 @@
           const container = document.getElementById("ap-right");
           const arr = Object.values(assignResult);
           if (!arr.length) return;
+          const assignModeLabel = getProdLogicModeLabel();
           const totalSO = arr.reduce((a, d) => a + d.soList.length, 0);
           const totalQty = arr.reduce((a, d) => a + d.newQty, 0);
           const skipSO = assignSkippedRows.length;
@@ -4531,14 +4615,15 @@
             (a, s) => a + Number(s.request_quantity || 0),
             0,
           );
-          let html = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px;flex-wrap:wrap"><div><div style="font-weight:700;font-size:14px">Hasil Alokasi</div><div class="mono" style="font-size:10px;color:var(--text3);margin-top:2px">${totalSO.toLocaleString("id-ID")} SO assigned · ${totalQty.toLocaleString("id-ID")} qty · ${skipSO.toLocaleString("id-ID")} SO skipped · ${arr.length} picker</div></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-ghost" onclick="copyAssignedGlobal('so',this,event)">📋 Copy All SO</button><button class="btn-ghost" onclick="copyAssignedGlobal('upload',this,event)">📋 Copy WMS Format</button><button class="btn-ghost" onclick="submitToGoogle()" style="background:var(--green);color:#fff;border:none;font-weight:600;padding:6px 12px">💾 Simpan ke Google Sheets</button></div></div>${skipSO ? `<div style="margin-bottom:12px;background:var(--amber-dim);border:1px solid var(--amber-light);color:var(--amber);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:11px">⚠️ ${skipSO} SO / ${skipQty.toLocaleString("id-ID")} qty di-skip (target full / picker kurang)</div>` : ""}<div style="display:flex;flex-direction:column;gap:10px" id="picker-grid">`;
+          let html = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px;flex-wrap:wrap"><div><div style="font-weight:700;font-size:14px">Hasil Alokasi</div><div class="mono" style="font-size:10px;color:var(--text3);margin-top:2px">${totalSO.toLocaleString("id-ID")} SO assigned · ${totalQty.toLocaleString("id-ID")} qty · ${skipSO.toLocaleString("id-ID")} SO skipped · ${arr.length} picker · ${esc(assignModeLabel)}</div></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-ghost" onclick="copyAssignedGlobal('so',this,event)">📋 Copy All SO</button><button class="btn-ghost" onclick="copyAssignedGlobal('upload',this,event)">📋 Copy WMS Format</button><button class="btn-ghost" onclick="submitToGoogle()" style="background:var(--green);color:#fff;border:none;font-weight:600;padding:6px 12px">💾 Simpan ke Google Sheets</button></div></div>${skipSO ? `<div style="margin-bottom:12px;background:var(--amber-dim);border:1px solid var(--amber-light);color:var(--amber);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:11px">⚠️ ${skipSO} SO / ${skipQty.toLocaleString("id-ID")} qty di-skip (target full / picker kurang)</div>` : ""}<div style="display:flex;flex-direction:column;gap:10px" id="picker-grid">`;
           arr.forEach((d, idx) => {
             const cardTarget = getPickerCardTarget(d, tgt);
+            const cardTargetLabel = getPickerCardTargetLabel(d, tgt);
             const pctRaw = Math.round(
               (d.totalQty / Math.max(1, cardTarget)) * 100,
             );
             const pct = Math.min(100, pctRaw);
-            const isOver = d.totalQty > tgt;
+            const isOver = d.totalQty > cardTarget;
             const barColor = isOver
               ? "var(--red)"
               : pct > 80
@@ -4576,7 +4661,7 @@
                 return `<tr><td class="mono">${esc(s.so_number)}</td><td style="font-weight:500">${esc(s.destination_name || "-")}</td><td class="mono"><span class="zone-badge">${esc(s.picking_zone || "-")}</span></td><td>${waveBadge(w)}</td><td><span class="badge ${badgeClass(t)}">${esc(t)}</span></td><td class="mono" style="text-align:right;font-weight:700">${Number(s.request_quantity || 0).toLocaleString("id-ID")}${s.force_assigned ? ' <span class="badge s-prog">forced</span>' : ""}</td></tr>`;
               })
               .join("");
-            html += `<div class="pc" data-picker="${esc(d.picker)}" data-staff-id="${esc(sid)}"><div class="pc-head" onclick="this.parentElement.classList.toggle('open')"><div class="pc-av" style="background:${COLORS[idx % COLORS.length]}22;color:${COLORS[idx % COLORS.length]}">${esc(d.picker.slice(0, 2).toUpperCase())}</div><div class="pc-info"><div class="pc-name">${esc(sid ? sid + " | " : "")}${esc(d.picker)}</div><div class="pc-meta">${d.zone && d.zone !== "-" ? esc(d.zone) + " · " : ""}${d.zoneGroup ? esc(d.zoneGroup) + " · " : ""}${d.soList.length.toLocaleString("id-ID")} SO baru · ${d.newQty.toLocaleString("id-ID")} qty · target ${cardTarget.toLocaleString("id-ID")}</div></div><div class="pc-right"><div style="text-align:right"><div class="pc-qty">${d.totalQty.toLocaleString("id-ID")} Qty</div><div class="pc-pct" style="color:${barColor};font-weight:600">${pctRaw}% dari target</div></div><div class="chevron">▼</div></div></div><div class="pc-bar"><div class="bar-bg"><div class="bar-fg" style="width:${pct}%;background:${barColor}"></div></div><div class="bar-lbl">(Beban: ${d.initialQty.toLocaleString("id-ID")} | Baru: +${d.newQty.toLocaleString("id-ID")})</div></div><div class="pc-detail"><div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--bg3)"><div style="display:flex;gap:5px;flex-wrap:wrap">${zChips || '<span class="mono" style="color:var(--text3)">No zone</span>'}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="copy-btn" onclick="copyAssignedPicker('so',this,event)">📋 Copy SO</button><button class="copy-btn" onclick="copyAssignedPicker('upload',this,event)">📋 Copy WMS</button><button class="copy-btn" onclick="downloadAssignedPickerCSV(this,event)">📥 CSV</button></div></div><div style="overflow:auto;max-height:420px"><table><thead><tr><th>SO Number</th><th>Destination</th><th>Zone</th><th>Wave</th><th>Drop</th><th style="text-align:right">Qty</th></tr></thead><tbody>${trows}</tbody></table></div></div></div>`;
+            html += `<div class="pc" data-picker="${esc(d.picker)}" data-staff-id="${esc(sid)}"><div class="pc-head" onclick="this.parentElement.classList.toggle('open')"><div class="pc-av" style="background:${COLORS[idx % COLORS.length]}22;color:${COLORS[idx % COLORS.length]}">${esc(d.picker.slice(0, 2).toUpperCase())}</div><div class="pc-info"><div class="pc-name">${esc(sid ? sid + " | " : "")}${esc(d.picker)}</div><div class="pc-meta">${d.zone && d.zone !== "-" ? esc(d.zone) + " · " : ""}${d.zoneGroup ? esc(d.zoneGroup) + " · " : ""}${d.soList.length.toLocaleString("id-ID")} SO baru · ${d.newQty.toLocaleString("id-ID")} qty · target ${cardTargetLabel}</div></div><div class="pc-right"><div style="text-align:right"><div class="pc-qty">${d.totalQty.toLocaleString("id-ID")} Qty</div><div class="pc-pct" style="color:${barColor};font-weight:600">${pctRaw}% dari target</div></div><div class="chevron">▼</div></div></div><div class="pc-bar"><div class="bar-bg"><div class="bar-fg" style="width:${pct}%;background:${barColor}"></div></div><div class="bar-lbl">(Beban: ${d.initialQty.toLocaleString("id-ID")} | Baru: +${d.newQty.toLocaleString("id-ID")})</div></div><div class="pc-detail"><div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--bg3)"><div style="display:flex;gap:5px;flex-wrap:wrap">${zChips || '<span class="mono" style="color:var(--text3)">No zone</span>'}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="copy-btn" onclick="copyAssignedPicker('so',this,event)">📋 Copy SO</button><button class="copy-btn" onclick="copyAssignedPicker('upload',this,event)">📋 Copy WMS</button><button class="copy-btn" onclick="downloadAssignedPickerCSV(this,event)">📥 CSV</button></div></div><div style="overflow:auto;max-height:420px"><table><thead><tr><th>SO Number</th><th>Destination</th><th>Zone</th><th>Wave</th><th>Drop</th><th style="text-align:right">Qty</th></tr></thead><tbody>${trows}</tbody></table></div></div></div>`;
           });
           html += `</div>`;
           container.innerHTML = html;
@@ -5641,6 +5726,128 @@
             })
             .join("");
         }
+        function getResetAssignmentCandidates(scope) {
+          const grouped = getGroupedSOList(soData);
+          const useAll = String(scope || "").toUpperCase() === "ALL";
+          return grouped.filter((s) => {
+            if (!useAll) {
+              if (!isSOForCurrentAssignMode(s)) return false;
+              const w = s.WAVE || getWave(s.destination_name);
+              const t = s.type || getType(s.destination_name);
+              if (!fWave.has(w) || !fType.has(t) || !fZone.has(s.picking_zone))
+                return false;
+            }
+            const pickerValue =
+              s.Picker || s.picker || s.local_picker || s.local_staff_id || "";
+            return Boolean(s.locked) || !isBlankPickerValue(pickerValue);
+          });
+        }
+        async function resetAssignmentLock() {
+          if (isPreviewSandbox()) {
+            alert("Preview mode: reset lock dimatikan.");
+            return;
+          }
+          const raw = prompt(
+            "Reset lock assignment. Ketik FILTER untuk reset sesuai filter aktif, atau ALL untuk semua SO yang locked/assigned.",
+            "FILTER",
+          );
+          if (raw === null) return;
+          const scope = String(raw || "FILTER")
+            .trim()
+            .toUpperCase();
+          if (!["FILTER", "ALL"].includes(scope)) {
+            alert("Scope tidak valid. Pakai FILTER atau ALL.");
+            return;
+          }
+          const rows = getResetAssignmentCandidates(scope);
+          if (!rows.length) {
+            alert(
+              scope === "ALL"
+                ? "Tidak ada SO locked/assigned yang bisa di-reset."
+                : "Tidak ada SO locked/assigned di filter aktif.",
+            );
+            return;
+          }
+          const qty = rows.reduce(
+            (a, s) => a + Number(s.request_quantity || 0),
+            0,
+          );
+          const ok = confirm(
+            `Reset ${rows.length.toLocaleString("id-ID")} SO / ${qty.toLocaleString("id-ID")} qty?\n\nScope: ${scope}\nAksi ini akan membuka lock assignment di backend, jadi SO bisa di-assign ulang.`,
+          );
+          if (!ok) return;
+
+          const btn = document.querySelector(
+            '[onclick="resetAssignmentLock()"]',
+          );
+          const oldText = btn ? btn.innerText : "";
+          if (btn) {
+            btn.innerText = "Resetting...";
+            btn.disabled = true;
+            btn.style.opacity = "0.65";
+          }
+
+          const payloadRows = rows.map((s) => ({
+            so_number: s.so_number,
+            so_id: extractWmsSoId(s.so_number),
+            lock_batch_id: s.lock_batch_id || "",
+            picker: s.Picker || s.local_picker || "",
+            staff_id: s.staff_id || s.local_staff_id || "",
+          }));
+
+          try {
+            const r = await fetch(GAS + "?t=" + Date.now(), {
+              method: "POST",
+              cache: "no-store",
+              body: JSON.stringify({
+                action: "resetAssignmentLock",
+                scope,
+                rows: payloadRows,
+                so_numbers: payloadRows.map((x) => x.so_id || x.so_number),
+                reset_by: "PLAYMAKER_PGS_WEB",
+              }),
+            });
+            const txt = await r.text();
+            let res = {};
+            try {
+              res = txt ? JSON.parse(txt) : {};
+            } catch (e) {
+              res = { raw: txt };
+            }
+            if (!r.ok)
+              throw new Error("HTTP " + r.status + " · " + txt.slice(0, 180));
+            if (!(res.status === "success" || res.success === true)) {
+              throw new Error(
+                res.error ||
+                  res.message ||
+                  "Backend belum support action resetAssignmentLock.",
+              );
+            }
+            const sum = res.summary || {};
+            addLog(
+              `Reset lock ${scope}: requested ${rows.length} · reset ${sum.reset || sum.updated || rows.length}`,
+              "ok",
+            );
+            alert(
+              `Reset lock selesai.\n\nScope: ${scope}\nRequested: ${rows.length} SO\nReset: ${sum.reset || sum.updated || rows.length}`,
+            );
+            lastBackendAssignedRows = [];
+            lastBackendAssignSummary = null;
+            assignResult = {};
+            assignSkippedRows = [];
+            assignForcedRows = [];
+            setTimeout(loadData, 600);
+          } catch (e) {
+            addLog("Reset lock error: " + (e.message || e), "err");
+            alert("Reset lock gagal: " + (e.message || e));
+          } finally {
+            if (btn) {
+              btn.innerText = oldText;
+              btn.disabled = false;
+              btn.style.opacity = "1";
+            }
+          }
+        }
         function downloadBlobFile(text, filename) {
           const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
           const url = URL.createObjectURL(blob);
@@ -5774,6 +5981,7 @@
         }
         document.addEventListener("DOMContentLoaded", () => {
           applySavedTheme();
+          initProdLogicToggle();
           document
             .getElementById("btn-add-picker")
             .addEventListener("click", addPicker);
